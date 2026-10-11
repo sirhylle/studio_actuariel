@@ -1,22 +1,28 @@
 export const PYTHON_CORE_SCRIPTS = {
-  // Script de profiling et d'échantillonnage représentatif
+  // Script de profiling et d'échantillonnage représentatif enrichi
   PROFILE_TABLE: `
 import polars as pl
 import json
+import math
 
-def profile_and_sample(alias, file_path, separator, sample_size):
-    # Lecture d'un bloc initial pour l'échantillon
-    df_sample = pl.read_csv(
-        file_path,
-        separator=separator,
-        n_rows=sample_size,
-        infer_schema_length=sample_size,
-        null_values=["", "NA", "NULL", ".", "None"],
-        truncate_ragged_lines=True
-    )
-    
-    # Récupération de la taille totale de la table complète si déjà chargée
-    df_full = globals().get("dfs_full", {}).get(alias, df_sample)
+def profile_and_sample(alias, file_path, separator, sample_size, file_type="csv", has_header=True):
+    # Lecture initiale selon le format
+    if file_type == "parquet":
+        df_full = pl.read_parquet(file_path)
+        df_sample = df_full.head(sample_size)
+    else:
+        # CSV / TSV avec gestion de has_header
+        df_sample = pl.read_csv(
+            file_path,
+            separator=separator,
+            has_header=has_header,
+            n_rows=sample_size,
+            infer_schema_length=sample_size,
+            null_values=["", "NA", "NULL", ".", "None", "NR"],
+            truncate_ragged_lines=True
+        )
+        df_full = globals().get("dfs_full", {}).get(alias, df_sample)
+
     total_row_count = df_full.height
 
     # Stockage global pour le mode dry-run
@@ -25,30 +31,71 @@ def profile_and_sample(alias, file_path, separator, sample_size):
     globals()["dfs_sample"][alias] = df_sample
 
     columns_summary = []
+    sas_candidates = ["9999", "99999", "-1", "-999", "99", "NR", "."]
+
     for col in df_sample.columns:
         s = df_sample[col]
         raw_type = str(s.dtype)
         semantic_type = raw_type
+        stats_data = {}
+        detected_sentinels = []
+        date_pattern = None
+
+        # Calcul des statistiques numériques
+        if s.dtype.is_numeric():
+            s_clean = s.drop_nulls()
+            if len(s_clean) > 0:
+                stats_data["min"] = float(s_clean.min()) if s_clean.min() is not None else None
+                stats_data["max"] = float(s_clean.max()) if s_clean.max() is not None else None
+                stats_data["median"] = float(s_clean.median()) if s_clean.median() is not None else None
+                try:
+                    stats_data["q25"] = float(s_clean.quantile(0.25))
+                    stats_data["q75"] = float(s_clean.quantile(0.75))
+                except Exception:
+                    pass
+                stats_data["nUnique"] = int(s_clean.n_unique())
+
+                # Détection de sentinelles numériques fréquentes en actuariat/SAS (ex: 9999, -1, 99)
+                for cand in [-1, 99, 999, 9999, 99999, -999]:
+                    if cand in s_clean:
+                        cnt = (s_clean == cand).sum()
+                        if cnt > 0:
+                            detected_sentinels.append(f"{cand} (x{cnt})")
 
         # Détection sémantique avancée sur les colonnes String
-        if s.dtype == pl.String:
+        elif s.dtype == pl.String:
             non_nulls = s.drop_nulls()
             if len(non_nulls) > 0:
-                sample_list = non_nulls.head(10).to_list()
-                
+                sample_list = [str(x) for x in non_nulls.head(20).to_list()]
+                stats_data["nUnique"] = int(non_nulls.n_unique())
+
+                # Vérification de sentinelles textuelles
+                for cand in ["9999", "-1", "NR", "NC", "SANS", "."]:
+                    if cand in sample_list:
+                        detected_sentinels.append(cand)
+
                 # Test 1 : Nombre décimal avec virgule française (ex: 1250,50 ou -12,4)
-                if any("," in str(x) for x in sample_list):
+                if any("," in x for x in sample_list):
                     try:
                         non_nulls.str.replace(" ", "").str.replace(",", ".").cast(pl.Float64, strict=True)
                         semantic_type = "Float (virgule FR)"
                     except Exception:
                         pass
-                
-                # Test 2 : Date au format français (ex: 01/01/2024)
-                if semantic_type == raw_type and any("/" in str(x) for x in sample_list):
+
+                # Test 2 : Date au format français (ex: 01/01/2024 ou 2024-01-01)
+                if semantic_type == raw_type and any("/" in x for x in sample_list):
                     try:
                         non_nulls.str.to_date("%d/%m/%Y", strict=True)
                         semantic_type = "Date (JJ/MM/AAAA)"
+                        date_pattern = "%d/%m/%Y"
+                    except Exception:
+                        pass
+
+                if semantic_type == raw_type and any("-" in x for x in sample_list):
+                    try:
+                        non_nulls.str.to_date("%Y-%m-%d", strict=True)
+                        semantic_type = "Date (AAAA-MM-JJ)"
+                        date_pattern = "%Y-%m-%d"
                     except Exception:
                         pass
 
@@ -58,7 +105,10 @@ def profile_and_sample(alias, file_path, separator, sample_size):
             "semanticType": semantic_type,
             "nullCount": int(s.null_count()),
             "uniqueCount": int(s.n_unique()),
-            "sampleValues": s.drop_nulls().head(3).to_list()
+            "sampleValues": s.drop_nulls().head(3).to_list(),
+            "stats": stats_data if stats_data else None,
+            "sasSentinels": detected_sentinels if detected_sentinels else None,
+            "datePattern": date_pattern
         }
         columns_summary.append(summary)
 
@@ -127,16 +177,17 @@ def run_extraction(extraction_code):
     return json.dumps(data, default=str)
 `,
 
-  // Wrapper d'exécution (Dry-Run sur dfs_sample ou Full sur dfs_full) avec capture stdout et sorties polyvalentes
+  // Wrapper d'exécution (Dry-Run sur dfs_sample ou Full sur dfs_full) avec Lazy streaming et gc.collect()
   RUNNER_WRAPPER: `
 import polars as pl
 import json
 import math
 import sys
 import io
+import gc
 import traceback
 
-def run_pipeline(user_code, is_dry_run=True, output_sep=";"):
+def run_pipeline(user_code, is_dry_run=True, output_sep=";", output_format="csv"):
     if is_dry_run:
         env_dfs = globals().get("dfs_sample", {})
     else:
@@ -175,17 +226,26 @@ def run_pipeline(user_code, is_dry_run=True, output_sep=";"):
             "error": exec_error
         }, default=str)
 
-    # Vérification de df_out
+    # Récupération et conversion tolérante de df_out
     df_candidate = exec_globals.get("df_out")
 
-    # Tolérance : conversion automatique d'une Series en DataFrame mono-colonne
+    # Tolérance 1 : Conversion d'un LazyFrame avec streaming=True
+    if isinstance(df_candidate, pl.LazyFrame):
+        try:
+            df_candidate = df_candidate.collect(streaming=True)
+            exec_globals["df_out"] = df_candidate
+        except Exception:
+            df_candidate = df_candidate.collect()
+            exec_globals["df_out"] = df_candidate
+
+    # Tolérance 2 : Conversion automatique d'une Series en DataFrame mono-colonne
     if isinstance(df_candidate, pl.Series):
         df_candidate = df_candidate.to_frame()
         exec_globals["df_out"] = df_candidate
 
     if isinstance(df_candidate, pl.DataFrame):
         preview_rows = df_candidate.head(10).to_dicts()
-        # Nettoyage des NaN / Infinity
+        # Nettoyage des NaN / Infinity pour sérialisation JSON propre
         for row in preview_rows:
             for k, v in row.items():
                 if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
@@ -201,13 +261,19 @@ def run_pipeline(user_code, is_dry_run=True, output_sep=";"):
         }
 
         if not is_dry_run:
-            df_candidate.write_csv("/data/output.csv", separator=output_sep)
+            if output_format == "parquet":
+                df_candidate.write_parquet("/data/output.parquet")
+            else:
+                df_candidate.write_csv("/data/output.csv", separator=output_sep)
+
+        # Nettoyage mémoire Python explicite
+        gc.collect()
 
         return json.dumps(output_meta, default=str)
 
     # Cas où df_out n'est PAS un DataFrame
     if not is_dry_run:
-        raise ValueError("L'exécution complète et l'export CSV nécessitent impérativement un DataFrame nommé 'df_out'.")
+        raise ValueError("L'exécution complète nécessite impérativement un DataFrame nommé 'df_out'.")
 
     # Recherche d'un retour alternatif (ex: variable res, output, df)
     alt_var_name = None
@@ -218,6 +284,8 @@ def run_pipeline(user_code, is_dry_run=True, output_sep=";"):
             alt_val = exec_globals[k]
             alt_val_str = str(alt_val)
             break
+
+    gc.collect()
 
     return json.dumps({
         "hasValidDfOut": False,

@@ -41,28 +41,37 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       }
 
       case 'LOAD_TABLE': {
-        const { alias, fileName, buffer, separator, sampleSize } = payload;
-        const filePath = `/data/${alias}.csv`;
+        const { alias, fileName, buffer, separator, sampleSize, fileType, hasHeader } = payload;
+        const actualFileType = fileType || (fileName.endsWith('.parquet') || fileName.endsWith('.pq') ? 'parquet' : 'csv');
+        const ext = actualFileType === 'parquet' ? 'parquet' : 'csv';
+        const filePath = `/data/${alias}.${ext}`;
 
         // Écriture du fichier brut dans le MEMFS de Pyodide
         pyodideInstance.FS.writeFile(filePath, new Uint8Array(buffer));
 
-        // Chargement de la table complète pour les exécutions futures
-        const safeSep = separator.replace(/'/g, "\\'");
-        pyodideInstance.runPython(`
+        if (actualFileType === 'parquet') {
+          pyodideInstance.runPython(`dfs_full['${alias}'] = pl.read_parquet('${filePath}')`);
+        } else {
+          const safeSep = separator.replace(/'/g, "\\'");
+          const hasHeaderPy = hasHeader !== false ? 'True' : 'False';
+          pyodideInstance.runPython(`
 dfs_full['${alias}'] = pl.read_csv(
     '${filePath}',
     separator='${safeSep}',
-    null_values=["", "NA", "NULL", ".", "None"],
+    has_header=${hasHeaderPy},
+    null_values=["", "NA", "NULL", ".", "None", "NR"],
     truncate_ragged_lines=True
 )
 `);
+        }
 
         // Profiling et échantillon initial
         const profileFn = pyodideInstance.globals.get('profile_and_sample');
-        const rawJson = profileFn(alias, filePath, separator, sampleSize);
+        const rawJson = profileFn(alias, filePath, separator, sampleSize, actualFileType, hasHeader !== false);
         const data = JSON.parse(rawJson);
         data.fileName = fileName;
+        data.fileType = actualFileType;
+        data.hasHeader = hasHeader !== false;
 
         self.postMessage({ id, success: true, data } as WorkerResponse);
         break;
@@ -76,6 +85,9 @@ dfs_sample.pop('${alias}', None)
 `);
         try {
           pyodideInstance.FS.unlink(`/data/${alias}.csv`);
+        } catch (_) {}
+        try {
+          pyodideInstance.FS.unlink(`/data/${alias}.parquet`);
         } catch (_) {}
         self.postMessage({ id, success: true } as WorkerResponse);
         break;
@@ -120,12 +132,18 @@ dfs_sample.pop('${alias}', None)
 
       case 'EXECUTE_FULL': {
         const runFn = pyodideInstance.globals.get('run_pipeline');
-        const rawRes = runFn(payload.code, false, payload.outputSeparator || ';');
+        const outputFormat = payload.outputFormat || 'csv';
+        const rawRes = runFn(payload.code, false, payload.outputSeparator || ';', outputFormat);
         const meta = JSON.parse(rawRes);
 
-        // Lecture du fichier CSV final généré dans le MEMFS
-        const outBuffer = pyodideInstance.FS.readFile('/data/output.csv');
-        meta.outputCsvBuffer = outBuffer;
+        // Lecture du fichier généré dans le MEMFS
+        if (outputFormat === 'parquet') {
+          const outBuffer = pyodideInstance.FS.readFile('/data/output.parquet');
+          meta.outputParquetBuffer = outBuffer;
+        } else {
+          const outBuffer = pyodideInstance.FS.readFile('/data/output.csv');
+          meta.outputCsvBuffer = outBuffer;
+        }
 
         self.postMessage({ id, success: true, data: meta } as WorkerResponse);
         break;

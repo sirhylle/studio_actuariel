@@ -7,6 +7,8 @@ export type WorkerAction =
   | 'EXECUTE_DRY_RUN'
   | 'EXECUTE_FULL';
 
+export type SourceFileType = 'csv' | 'tsv' | 'parquet' | 'xlsx';
+
 export interface ColumnProfile {
   name: string;
   rawType: string;
@@ -14,15 +16,28 @@ export interface ColumnProfile {
   nullCount: number;
   uniqueCount: number;
   sampleValues: (string | number | boolean | null)[];
+  stats?: {
+    min?: number;
+    max?: number;
+    median?: number;
+    q25?: number;
+    q75?: number;
+    nUnique?: number;
+  };
+  sasSentinels?: string[];
+  datePattern?: string;
 }
 
 export interface TableProfile {
   alias: string;
   fileName: string;
+  fileType?: SourceFileType;
+  hasHeader?: boolean;
   totalRowCount: number;
   totalRowsSampled: number;
   columns: ColumnProfile[];
   rawRecordsHead: Record<string, any>[];
+  rawExcelSample?: string[][];
 }
 
 export interface ExecutionResult {
@@ -32,9 +47,17 @@ export interface ExecutionResult {
   outputColumns?: { name: string; dtype: string }[];
   headPreview?: Record<string, any>[];
   outputCsvBuffer?: Uint8Array;
+  outputParquetBuffer?: Uint8Array;
   stdout?: string;
   rawOutput?: string;
   error?: WorkerError;
+}
+
+export interface CodeHistoryEntry {
+  id: string;
+  timestamp: string;
+  code: string;
+  summary: string;
 }
 
 export interface PromptAttachment {
@@ -68,6 +91,8 @@ export interface WorkerPayloads {
     buffer: ArrayBuffer;
     separator: string;
     sampleSize: number;
+    fileType?: SourceFileType;
+    hasHeader?: boolean;
   };
   UNLOAD_TABLE: {
     alias: string;
@@ -84,6 +109,7 @@ export interface WorkerPayloads {
   EXECUTE_FULL: {
     code: string;
     outputSeparator: string;
+    outputFormat?: 'csv' | 'parquet';
   };
 }
 

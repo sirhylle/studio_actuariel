@@ -2,7 +2,7 @@ import { appState } from '../../state';
 
 export class SampleViewer {
   private container: HTMLElement;
-  private currentViewMode: 'preview' | 'schema' | 'extracted' = 'preview';
+  private currentViewMode: 'preview' | 'schema' | 'excel_raw' | 'extracted' = 'preview';
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -34,8 +34,13 @@ export class SampleViewer {
               <span>📋</span> Aperçu des lignes (head)
             </button>
             <button class="viewer-tab-btn ${this.currentViewMode === 'schema' ? 'active' : ''}" data-view="schema">
-              <span>📊</span> Synthèse des colonnes (${profile.columns.length})
+              <span>📊</span> Synthèse & Profil Actuariel (${profile.columns.length})
             </button>
+            ${profile.rawExcelSample ? `
+              <button class="viewer-tab-btn ${this.currentViewMode === 'excel_raw' ? 'active' : ''}" data-view="excel_raw">
+                <span>📑</span> Matrice Excel brute (Zone utile)
+              </button>
+            ` : ''}
             ${hasExtractedData ? `
               <button class="viewer-tab-btn ${this.currentViewMode === 'extracted' ? 'active' : ''}" data-view="extracted">
                 <span>🎯</span> Échantillon ciblé par le LLM
@@ -45,13 +50,15 @@ export class SampleViewer {
 
           <div class="viewer-stats-badge">
             <span>Table : <strong>dfs['${profile.alias}']</strong></span>
-            <span>(<strong>${profile.totalRowCount.toLocaleString()}</strong> lignes au total, ${profile.columns.length} colonnes)</span>
+            ${profile.fileType ? `<span class="format-badge format-${profile.fileType.toLowerCase()}">${profile.fileType.toUpperCase()}</span>` : ''}
+            <span>(<strong>${profile.totalRowCount.toLocaleString()}</strong> lignes, ${profile.columns.length} colonnes)</span>
           </div>
         </div>
 
         <div class="viewer-content">
           ${this.currentViewMode === 'preview' ? this.renderPreviewTable(profile) : ''}
           ${this.currentViewMode === 'schema' ? this.renderSchemaSummary(profile) : ''}
+          ${this.currentViewMode === 'excel_raw' ? this.renderExcelRaw(profile) : ''}
           ${this.currentViewMode === 'extracted' ? this.renderExtractedSample() : ''}
         </div>
       </div>
@@ -121,17 +128,21 @@ export class SampleViewer {
           <thead>
             <tr>
               <th>Nom de la colonne</th>
-              <th>Type brut Polars</th>
-              <th>Format sémantique détecté</th>
-              <th>Taux de valeurs nulles</th>
-              <th>Valeurs uniques</th>
-              <th>Exemples réels</th>
+              <th>Type brut</th>
+              <th>Format sémantique</th>
+              <th>Valeurs nulles</th>
+              <th>Uniques</th>
+              <th>Distribution (Min / Méd / Max)</th>
+              <th>Sentinelles détectées</th>
+              <th>Exemples</th>
             </tr>
           </thead>
           <tbody>
             ${profile.columns.map((col: any) => {
               const nullPct = ((col.nullCount / totalSampled) * 100).toFixed(1);
               const hasSemantic = col.semanticType && col.semanticType !== col.rawType;
+              const stats = col.stats;
+              const sentinels = col.sasSentinels || [];
               return `
                 <tr>
                   <td><strong>${col.name}</strong></td>
@@ -153,6 +164,22 @@ export class SampleViewer {
                   </td>
                   <td>${col.uniqueCount}</td>
                   <td>
+                    ${stats && stats.min !== undefined && stats.min !== null ? `
+                      <div class="stats-mini-box">
+                        <span>min: <strong>${stats.min}</strong></span>
+                        <span>méd: <strong>${stats.median ?? '-'}</strong></span>
+                        <span>max: <strong>${stats.max}</strong></span>
+                      </div>
+                    ` : '<span class="text-dim">-</span>'}
+                  </td>
+                  <td>
+                    ${sentinels.length > 0 ? `
+                      <div class="sentinel-tags-list">
+                        ${sentinels.map((s: string) => `<span class="sentinel-tag" title="Sentinelle SAS atypique">${s}</span>`).join('')}
+                      </div>
+                    ` : '<span class="text-dim">Aucune</span>'}
+                  </td>
+                  <td>
                     <div class="sample-pills">
                       ${col.sampleValues.map((v: any) => `
                         <span class="sample-pill">${v === null ? 'null' : String(v)}</span>
@@ -164,6 +191,34 @@ export class SampleViewer {
             }).join('')}
           </tbody>
         </table>
+      </div>
+    `;
+  }
+
+  private renderExcelRaw(profile: any): string {
+    const rawMatrix: string[][] = profile.rawExcelSample || [];
+    if (rawMatrix.length === 0) {
+      return `<div class="empty-data">Aucune donnée brute Excel disponible.</div>`;
+    }
+
+    return `
+      <div class="excel-raw-container">
+        <div class="excel-raw-header-notice">
+          <span>ℹ️</span>
+          <span>Matrice brute issue de la feuille Excel (jusqu'à 30 premières lignes). Le LLM utilise cette vue pour repérer automatiquement la zone de tableau utile et contourner les blocs de métadonnées ou de titres.</span>
+        </div>
+        <div class="table-scroll-container">
+          <table class="data-table excel-raw-table">
+            <tbody>
+              ${rawMatrix.map((row, rIdx) => `
+                <tr>
+                  <td class="row-num-col">L${rIdx + 1}</td>
+                  ${row.map(cell => `<td title="${cell}">${cell === '' ? '<span class="text-dim">∅</span>' : cell}</td>`).join('')}
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
       </div>
     `;
   }

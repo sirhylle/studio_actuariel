@@ -108,9 +108,28 @@ Tu dois renvoyer STRICTEMENT un objet JSON valide avec les clés :
 
     let userPrompt = `### TABLES DISPONIBLES :\n`;
     for (const t of tables) {
-      userPrompt += `\nTable dfs['${t.alias}'] (Total: ${t.totalRowCount} lignes) :\n`;
+      const typeStr = t.fileType ? ` [${t.fileType.toUpperCase()}${t.hasHeader === false ? ', SANS EN-TÊTE' : ''}]` : '';
+      userPrompt += `\nTable dfs['${t.alias}']${typeStr} (Total: ${t.totalRowCount} lignes) :\n`;
+      
+      // Si c'est un fichier Excel avec lignes brutes non nettoyées
+      if (t.rawExcelSample && t.rawExcelSample.length > 0) {
+        userPrompt += `  [Extrait brut des 15 premières lignes Excel (feuille complexe avec titres/métadonnées potentielles)] :\n`;
+        userPrompt += JSON.stringify(t.rawExcelSample.slice(0, 15)) + "\n";
+      }
+
       for (const c of t.columns) {
-        userPrompt += `- ${c.name} : type_brut=${c.rawType}, sémantique=${c.semanticType || c.rawType}, nulls=${c.nullCount}, exemples=${JSON.stringify(c.sampleValues)}\n`;
+        let colDesc = `- ${c.name} : type_brut=${c.rawType}, sémantique=${c.semanticType || c.rawType}, nulls=${c.nullCount}`;
+        if (c.stats) {
+          colDesc += `, stats=[min:${c.stats.min}, max:${c.stats.max}, med:${c.stats.median}, q25:${c.stats.q25}, q75:${c.stats.q75}, uniques:${c.stats.nUnique}]`;
+        }
+        if (c.sasSentinels && c.sasSentinels.length > 0) {
+          colDesc += `, SENTINELLES_DETECTEES=${JSON.stringify(c.sasSentinels)}`;
+        }
+        if (c.datePattern) {
+          colDesc += `, motif_date="${c.datePattern}"`;
+        }
+        colDesc += `, exemples=${JSON.stringify(c.sampleValues)}\n`;
+        userPrompt += colDesc;
       }
     }
     userPrompt += `\n### INSTRUCTION MÉTIER OU CODE SAS :\n${instruction}\n`;
@@ -142,17 +161,19 @@ Tu dois renvoyer STRICTEMENT un objet JSON valide avec les clés :
 Tu génères du code Python Polars rigoureux, vectorisé et exécutable dans WebAssembly Pyodide.
 
 RÈGLES IMPÉRATIVES :
-1. Le résultat final doit IMPÉRATIVEMENT être assigné à la variable 'df_out' (instance de pl.DataFrame).
+1. Le résultat final doit IMPÉRATIVEMENT être assigné à la variable 'df_out' (instance de pl.DataFrame ou pl.LazyFrame).
 2. Les tables sources sont déjà en mémoire dans le dictionnaire 'dfs' (ex: dfs['contrats']).
 3. Vectorisation stricte : AUCUNE boucle for/while, AUCUN .apply() ni .map_elements(). Utilise uniquement des expressions Polars.
-4. Analyse attentivement les exemples réels fournis dans l'échantillon ciblé :
+4. Optimisation mémoire WebAssembly : favorise les calculs par colonnes, évite les copies inutiles .clone(). Tu peux retourner un LazyFrame pl.LazyFrame si pertinent.
+5. Gestion experte des formats et anomalies :
+   - Fichiers Excel complexes : repère la zone de données utiles, ignore les en-têtes ou métadonnées parasites si applicable.
    - Nombres avec virgules (ex: '1250,50') : .str.replace(',', '.').cast(pl.Float64)
-   - Dates françaises (ex: '01/01/2024') : .str.to_date('%d/%m/%Y')
-   - Préserve les zéros non significatifs sur les identifiants ou codes produits.
-   - Les sentinelles SAS (les points '.') ont déjà été converties en null par Polars.
-5. Traduis les DATA steps avec RETAIN en calculs cumulés (.cum_sum()) ou en fonctions de fenêtrage (.over()).
-6. Réécris les PROC SUMMARY / MEANS en .group_by().agg().
-7. Réponds UNIQUEMENT au format JSON strict avec les clés :
+   - Dates françaises : .str.to_date('%d/%m/%Y') ou format ISO .str.to_date('%Y-%m-%d')
+   - Préserve les zéros non significatifs sur les identifiants ou codes produits (conserve en pl.String).
+   - Traite les sentinelles SAS (. ou 9999 ou -1) repérées dans le profil en les imputant correctement.
+6. Traduis les DATA steps avec RETAIN en calculs cumulés (.cum_sum()) ou en fonctions de fenêtrage (.over()).
+7. Réécris les PROC SUMMARY / MEANS en .group_by().agg().
+8. Réponds UNIQUEMENT au format JSON strict avec les clés :
    - "pythonCode" : string du code complet directement exécutable.
    - "transformationsApplied" : array de string listant les typages et opérations clés.
    - "warnings" : array de string signalant d'éventuelles anomalies repérées dans l'échantillon.`;
@@ -163,9 +184,14 @@ RÈGLES IMPÉRATIVES :
       userPrompt += JSON.stringify(extractedSamples, null, 2);
       userPrompt += `\n\`\`\`\n\n`;
     } else if (tables.length > 0) {
-      userPrompt += `### SCHÉMAS DES TABLES DISPONIBLES :\n`;
+      userPrompt += `### SCHÉMAS ET STATISTIQUES DES TABLES DISPONIBLES :\n`;
       for (const t of tables) {
-        userPrompt += `- Table dfs['${t.alias}'] : colonnes [${t.columns.map(c => c.name).join(', ')}]\n`;
+        userPrompt += `- Table dfs['${t.alias}'] [${t.fileType || 'csv'}] : colonnes [${t.columns.map(c => c.name).join(', ')}]\n`;
+        for (const c of t.columns) {
+          if (c.stats || (c.sasSentinels && c.sasSentinels.length > 0)) {
+            userPrompt += `    • ${c.name} : stats=${JSON.stringify(c.stats || {})}, sentinelles=${JSON.stringify(c.sasSentinels || [])}\n`;
+          }
+        }
       }
       userPrompt += `\n`;
     } else {

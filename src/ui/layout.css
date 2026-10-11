@@ -1619,3 +1619,192 @@ body {
   filter: grayscale(60%);
 }
 
+/* Badges de formats de fichiers */
+.format-badge {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+.format-badge.format-csv {
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--accent-blue);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+.format-badge.format-tsv {
+  background: rgba(251, 191, 36, 0.15);
+  color: var(--accent-amber);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+}
+.format-badge.format-parquet {
+  background: rgba(52, 211, 153, 0.18);
+  color: var(--accent-green);
+  border: 1px solid rgba(52, 211, 153, 0.4);
+}
+.format-badge.format-xlsx,
+.format-badge.format-xls {
+  background: rgba(168, 85, 247, 0.18);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.4);
+}
+
+.parquet-info-pill {
+  font-size: 11px;
+  color: var(--accent-green);
+  background: rgba(52, 211, 153, 0.08);
+  border: 1px solid rgba(52, 211, 153, 0.25);
+  padding: 4px 8px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.control-group-header-toggle {
+  margin-top: 4px;
+}
+.control-group-header-toggle .checkbox-label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* Contrôles de navigation d'historique ◀ / ▶ */
+.history-nav-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-app);
+  border: 1px solid var(--border-card);
+  border-radius: 6px;
+  padding: 2px 6px;
+  margin-left: 10px;
+}
+.hist-btn {
+  font-size: 10px;
+  color: var(--text-muted);
+  padding: 2px 6px;
+}
+.hist-btn:not(:disabled):hover {
+  color: var(--accent-blue);
+  background: var(--bg-hover);
+}
+.hist-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.hist-indicator {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--accent-blue);
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+/* Menu déroulant d'export */
+.export-dropdown-wrapper {
+  position: relative;
+  display: inline-flex;
+}
+.export-dropdown-wrapper #btn-full-run {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: 1px solid rgba(0, 0, 0, 0.2);
+}
+.export-toggle-btn {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  padding: 0 7px;
+  font-weight: 700;
+}
+.export-dropdown-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border-card);
+  border-radius: 6px;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+  min-width: 210px;
+  z-index: 50;
+  padding: 4px 0;
+}
+.dropdown-item {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text-main);
+  padding: 8px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.15s;
+}
+.dropdown-item:hover {
+  background: var(--bg-hover);
+  color: var(--accent-blue);
+}
+.dropdown-sep {
+  height: 1px;
+  background: var(--border-card);
+  margin: 4px 0;
+}
+
+/* Stats mini-box et Sentinelles SAS */
+.stats-mini-box {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+.stats-mini-box strong {
+  color: var(--accent-blue);
+}
+.sentinel-tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.sentinel-tag {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+/* Vue brute Excel */
+.excel-raw-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+}
+.excel-raw-header-notice {
+  font-size: 12px;
+  color: var(--text-muted);
+  background: rgba(168, 85, 247, 0.08);
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  padding: 8px 12px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.excel-raw-table td {
+  font-size: 11px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+

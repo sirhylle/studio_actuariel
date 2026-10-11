@@ -156,6 +156,7 @@ export class Orchestrator {
         // Succès total !
         appState.setCode(currentCode);
         appState.setDryRunResult(dryRunRes);
+        appState.pushExecutedCode(currentCode, 'Validation IA');
         appState.setStatus('READY', 'Code validé et prêt à l\'emploi');
         appState.addLog(`Test Dry-Run réussi (${dryRunRes.outputRowCount} lignes produites dans df_out).`, 'success');
         return true;

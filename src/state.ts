@@ -9,6 +9,9 @@ export interface LoadedTable {
   buffer: ArrayBuffer;
   separator: string;
   sampleSize: number;
+  fileType?: 'csv' | 'tsv' | 'parquet' | 'xlsx';
+  hasHeader?: boolean;
+  rawExcelSample?: string[][];
   profile?: TableProfile;
 }
 
@@ -17,6 +20,14 @@ export interface LogEntry {
   level: 'info' | 'success' | 'warn' | 'error';
   message: string;
   details?: any;
+}
+
+export interface CodeHistoryItem {
+  id: string;
+  code: string;
+  timestamp: string;
+  label: string;
+  hasValidDfOut: boolean;
 }
 
 class AppState {
@@ -29,6 +40,10 @@ class AppState {
   public activeTableAlias: string | null = null;
   
   public currentCode: string = '';
+  public liveDraftCode: string = '';
+  public codeHistory: CodeHistoryItem[] = [];
+  public historyIndex: number = -1; // -1 = live draft, 0..N = index in history
+
   public promptInstruction: string = '';
   public promptAttachments: PromptAttachment[] = [];
   public lastError: WorkerError | null = null;
@@ -153,6 +168,17 @@ class AppState {
     const codeChanged = this.currentCode !== code;
     this.currentCode = code;
 
+    // Si l'utilisateur édite manuellement le code alors qu'on est sur le draft (-1), mettre à jour liveDraftCode
+    if (isFromUserEdit) {
+      if (this.historyIndex === -1) {
+        this.liveDraftCode = code;
+      } else {
+        // Si l'utilisateur modifie une version issue de l'historique, cela devient son nouveau draft en direct
+        this.historyIndex = -1;
+        this.liveDraftCode = code;
+      }
+    }
+
     // Si le code est complètement vidé par l'utilisateur
     if (!code.trim()) {
       this.lastError = null;
@@ -163,6 +189,76 @@ class AppState {
     }
 
     this.notify();
+  }
+
+  /**
+   * Sauvegarde un code dans l'historique dès qu'il fait l'objet d'un test (Dry-Run ou exécution).
+   */
+  public pushExecutedCode(code: string, label = 'Exécution') {
+    if (!code.trim()) return;
+
+    // Éviter d'ajouter un doublon consécutif identique
+    const last = this.codeHistory[this.codeHistory.length - 1];
+    if (last && last.code.trim() === code.trim()) {
+      last.hasValidDfOut = !!this.dryRunResult?.hasValidDfOut;
+      return;
+    }
+
+    const item: CodeHistoryItem = {
+      id: `hist_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      code,
+      timestamp: new Date().toLocaleTimeString(),
+      label,
+      hasValidDfOut: !!this.dryRunResult?.hasValidDfOut
+    };
+
+    this.codeHistory.push(item);
+    // Limite à 50 versions
+    if (this.codeHistory.length > 50) this.codeHistory.shift();
+
+    // Après une exécution, on est positionné sur la dernière version exécutée
+    this.historyIndex = -1;
+    this.liveDraftCode = code;
+    this.notify();
+  }
+
+  /**
+   * Navigation dans l'historique : direction = -1 (précédent / back) ou +1 (suivant / forward).
+   */
+  public navigateHistory(direction: -1 | 1): boolean {
+    if (this.codeHistory.length === 0) return false;
+
+    if (direction === -1) {
+      // Reculer
+      if (this.historyIndex === -1) {
+        // On était sur le draft en direct : sauvegarder le live draft avant de reculer
+        this.liveDraftCode = this.currentCode;
+        this.historyIndex = this.codeHistory.length - 1;
+      } else if (this.historyIndex > 0) {
+        this.historyIndex--;
+      } else {
+        return false; // Déjà au tout début
+      }
+      this.currentCode = this.codeHistory[this.historyIndex].code;
+      this.notify();
+      return true;
+    } else if (direction === 1) {
+      // Avancer
+      if (this.historyIndex === -1) {
+        return false; // Déjà sur le live draft
+      }
+      if (this.historyIndex < this.codeHistory.length - 1) {
+        this.historyIndex++;
+        this.currentCode = this.codeHistory[this.historyIndex].code;
+      } else {
+        // Retour sur le draft en direct
+        this.historyIndex = -1;
+        this.currentCode = this.liveDraftCode;
+      }
+      this.notify();
+      return true;
+    }
+    return false;
   }
 
   public setPromptInstruction(instruction: string) {

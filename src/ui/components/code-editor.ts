@@ -4,6 +4,7 @@ import { oneDark } from '@codemirror/theme-one-dark';
 import { appState } from '../../state';
 import { workerBridge } from '../../services/worker-client';
 import { orchestrator } from '../../services/orchestrator';
+import { exportService } from '../../services/export-service';
 
 export class CodeEditor {
   private container: HTMLElement;
@@ -105,6 +106,7 @@ export class CodeEditor {
 
       const res = await workerBridge.executeDryRun(code);
       appState.setDryRunResult(res);
+      appState.pushExecutedCode(code, 'Test Dry-Run');
 
       appState.setStatus('READY', 'Pyodide & Polars Prêts');
       if (res.hasValidDfOut) {
@@ -208,21 +210,104 @@ export class CodeEditor {
     appState.addLog("Erreur d'exécution attachée au contexte de la consigne.", 'success');
   }
 
+  private handleHistoryNav(direction: -1 | 1) {
+    const moved = appState.navigateHistory(direction);
+    if (moved) {
+      const idx = appState.historyIndex;
+      const total = appState.codeHistory.length;
+      if (idx === -1) {
+        appState.addLog("Historique : retour au brouillon en direct.", 'info');
+      } else {
+        const item = appState.codeHistory[idx];
+        appState.addLog(`Historique : version ${idx + 1}/${total} [${item.label} à ${item.timestamp}] restaurée.`, 'info');
+      }
+    }
+  }
+
+  private handleExportNotebook() {
+    const code = this.editorView ? this.editorView.state.doc.toString() : appState.currentCode;
+    if (!code.trim()) return;
+    const nbStr = exportService.generateNotebook(code);
+    exportService.triggerDownload(nbStr, 'pipeline_actuariel.ipynb', 'application/x-ipynb+json');
+    appState.addLog("Jupyter Notebook (.ipynb) généré et téléchargé.", 'success');
+  }
+
+  private handleExportScript() {
+    const code = this.editorView ? this.editorView.state.doc.toString() : appState.currentCode;
+    if (!code.trim()) return;
+    const pyStr = exportService.generateBatchScript(code);
+    exportService.triggerDownload(pyStr, 'pipeline_actuariel.py', 'text/x-python');
+    appState.addLog("Script CLI de production (.py) généré et téléchargé.", 'success');
+  }
+
+  private async handleExportParquet() {
+    const code = this.editorView ? this.editorView.state.doc.toString() : appState.currentCode;
+    if (!code.trim()) return;
+
+    if (!appState.dryRunResult?.hasValidDfOut) {
+      alert("L'export Parquet nécessite impérativement un DataFrame 'df_out' valide issu d'un test Dry-Run.");
+      return;
+    }
+
+    appState.setStatus('PROCESSING', 'Exportation complète en format Apache Parquet...');
+    appState.addLog("Calcul et écriture du fichier Apache Parquet...", 'info');
+
+    try {
+      const res = await workerBridge.executeFull(code, ';', 'parquet');
+      appState.setDryRunResult(res);
+      appState.setStatus('READY', 'Export Parquet terminé');
+      appState.addLog(`Fichier Parquet généré avec succès (${res.outputRowCount} lignes).`, 'success');
+
+      if (res.outputParquetBuffer) {
+        exportService.triggerDownload(res.outputParquetBuffer, 'resultat_actuariel.parquet', 'application/octet-stream');
+      }
+    } catch (err: any) {
+      appState.setStatus('ERROR', `Échec export Parquet : ${err.message || String(err)}`);
+      appState.addLog(`Erreur export Parquet : ${err.message || String(err)}`, 'error');
+    }
+  }
+
   public render() {
     const canExport = !!appState.dryRunResult?.hasValidDfOut;
+    const histIdx = appState.historyIndex;
+    const histTotal = appState.codeHistory.length;
+    const canGoBack = histTotal > 0 && (histIdx === -1 ? true : histIdx > 0);
+    const canGoForward = histIdx !== -1;
+    const histLabel = histIdx === -1 
+      ? (histTotal > 0 ? `Brouillon (${histTotal} versions)` : 'Brouillon') 
+      : `v${histIdx + 1}/${histTotal}`;
 
     this.container.innerHTML = `
       <div class="code-editor-panel">
         <div class="editor-toolbar">
           <div class="toolbar-title">
             <span class="icon">🐍</span>
-            <h3>Script Python (Polars vectorisé)</h3>
+            <h3>Script Python</h3>
+
+            <!-- Contrôles d'historique ◀ / ▶ -->
+            <div class="history-nav-controls">
+              <button class="btn-icon hist-btn" id="btn-hist-back" title="Version précédente exécutée" ${canGoBack ? '' : 'disabled'}>◀</button>
+              <span class="hist-indicator" title="Position dans l'historique d'exécution">${histLabel}</span>
+              <button class="btn-icon hist-btn" id="btn-hist-forward" title="Version suivante / Brouillon" ${canGoForward ? '' : 'disabled'}>▶</button>
+            </div>
           </div>
+          
           <div class="toolbar-actions">
-            <button class="btn btn-secondary btn-sm ${appState.currentCode.trim() ? '' : 'btn-disabled'}" id="btn-attach-code" title="${appState.currentCode.trim() ? 'Joindre ce code comme contexte au prompt' : 'Aucun code à joindre pour le moment'}" ${appState.currentCode.trim() ? '' : 'disabled'}>📎 Joindre au prompt</button>
+            <button class="btn btn-secondary btn-sm ${appState.currentCode.trim() ? '' : 'btn-disabled'}" id="btn-attach-code" title="${appState.currentCode.trim() ? 'Joindre ce code comme contexte au prompt' : 'Aucun code à joindre pour le moment'}" ${appState.currentCode.trim() ? '' : 'disabled'}>📎 Joindre</button>
             <button class="btn btn-secondary btn-sm" id="btn-copy-code" title="Copier le code">📋 Copier</button>
             <button class="btn btn-secondary btn-sm" id="btn-dry-run" title="Tester sur échantillon">▶️ Tester (Dry-Run)</button>
-            <button class="btn btn-success btn-sm ${canExport ? '' : 'btn-disabled'}" id="btn-full-run" title="${canExport ? 'Exécuter et exporter CSV' : 'Nécessite un DataFrame df_out valide issu d\'un test Dry-Run'}" ${canExport ? '' : 'disabled'}>⚡ Exécuter & Exporter CSV</button>
+
+            <!-- Menu Export polyvalent -->
+            <div class="export-dropdown-wrapper">
+              <button class="btn btn-success btn-sm ${canExport ? '' : 'btn-disabled'}" id="btn-full-run" title="${canExport ? 'Exécuter et exporter CSV' : 'Nécessite un DataFrame df_out valide issu d\'un test Dry-Run'}" ${canExport ? '' : 'disabled'}>⚡ Exécuter CSV</button>
+              <button class="btn btn-success btn-sm export-toggle-btn ${canExport ? '' : 'btn-disabled'}" id="btn-export-toggle" title="Options d'export (Parquet, Notebook, Script)" ${canExport ? '' : 'disabled'}>▾</button>
+              <div class="export-dropdown-menu" id="export-dropdown-menu" style="display: none;">
+                <button class="dropdown-item" id="btn-export-parquet">📦 Exporter Parquet (.parquet)</button>
+                <div class="dropdown-sep"></div>
+                <button class="dropdown-item" id="btn-export-notebook">📓 Cahier Jupyter (.ipynb)</button>
+                <button class="dropdown-item" id="btn-export-script">🐍 Script Batch CLI (.py)</button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -356,6 +441,39 @@ export class CodeEditor {
     this.container.querySelector('#btn-full-run')?.addEventListener('click', () => this.handleFullRun());
     this.container.querySelector('#btn-copy-code')?.addEventListener('click', () => this.copyCode());
     this.container.querySelector('#btn-attach-code')?.addEventListener('click', () => this.attachCodeToPrompt());
+
+    // Navigation dans l'historique
+    this.container.querySelector('#btn-hist-back')?.addEventListener('click', () => this.handleHistoryNav(-1));
+    this.container.querySelector('#btn-hist-forward')?.addEventListener('click', () => this.handleHistoryNav(1));
+
+    // Menu d'export
+    const toggleBtn = this.container.querySelector('#btn-export-toggle');
+    const menu = this.container.querySelector('#export-dropdown-menu') as HTMLElement;
+    toggleBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (menu) {
+        menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+      }
+    });
+
+    document.addEventListener('click', () => {
+      if (menu) menu.style.display = 'none';
+    });
+
+    this.container.querySelector('#btn-export-parquet')?.addEventListener('click', () => {
+      if (menu) menu.style.display = 'none';
+      this.handleExportParquet();
+    });
+
+    this.container.querySelector('#btn-export-notebook')?.addEventListener('click', () => {
+      if (menu) menu.style.display = 'none';
+      this.handleExportNotebook();
+    });
+
+    this.container.querySelector('#btn-export-script')?.addEventListener('click', () => {
+      if (menu) menu.style.display = 'none';
+      this.handleExportScript();
+    });
   }
 
   private bindGlobalEvents() {

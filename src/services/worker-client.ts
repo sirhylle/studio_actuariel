@@ -68,14 +68,18 @@ class WorkerClient {
     fileName: string,
     buffer: ArrayBuffer,
     separator = ';',
-    sampleSize = 1000
+    sampleSize = 1000,
+    fileType?: 'csv' | 'tsv' | 'parquet' | 'xlsx',
+    hasHeader = true
   ): Promise<TableProfile> {
     return this.send<TableProfile>('LOAD_TABLE', {
       alias,
       fileName,
       buffer,
       separator,
-      sampleSize
+      sampleSize,
+      fileType,
+      hasHeader
     });
   }
 
@@ -95,10 +99,11 @@ class WorkerClient {
     return this.send<ExecutionResult>('EXECUTE_DRY_RUN', { code });
   }
 
-  public async executeFull(code: string, outputSeparator = ';'): Promise<ExecutionResult> {
+  public async executeFull(code: string, outputSeparator = ';', outputFormat: 'csv' | 'parquet' = 'csv'): Promise<ExecutionResult> {
     return this.send<ExecutionResult>('EXECUTE_FULL', {
       code,
-      outputSeparator
+      outputSeparator,
+      outputFormat
     });
   }
 }
