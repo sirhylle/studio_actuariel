@@ -34,7 +34,7 @@ export class CodeEditor {
           if (update.docChanged) {
             const newCode = update.state.doc.toString();
             this.lastRenderedCode = newCode;
-            appState.setCode(newCode);
+            appState.setCode(newCode, true);
           }
         })
       ],
@@ -50,6 +50,20 @@ export class CodeEditor {
       });
     }
 
+    // Contrôle strict du bouton Exécuter & Exporter CSV
+    const fullRunBtn = this.container.querySelector('#btn-full-run') as HTMLButtonElement;
+    if (fullRunBtn) {
+      const canExport = !!appState.dryRunResult?.hasValidDfOut;
+      fullRunBtn.disabled = !canExport;
+      if (canExport) {
+        fullRunBtn.classList.remove('btn-disabled');
+        fullRunBtn.title = "Exécuter sur l'ensemble des données et télécharger le fichier CSV";
+      } else {
+        fullRunBtn.classList.add('btn-disabled');
+        fullRunBtn.title = "Nécessite un DataFrame 'df_out' valide validé par un test Dry-Run";
+      }
+    }
+
     this.renderResultPreview();
   }
 
@@ -63,14 +77,42 @@ export class CodeEditor {
     try {
       const ast = await workerBridge.checkSyntax(code);
       if (!ast.valid) {
-        throw (ast as any).error || new Error('Erreur de syntaxe');
+        const error = ast.error || { phase: 'AST', message: 'Erreur de syntaxe Python' };
+        appState.setLastError(error);
+        appState.setDryRunResult({
+          hasValidDfOut: false,
+          error
+        });
+        appState.setStatus('ERROR', `Erreur syntaxique AST : ${error.message}`);
+        appState.addLog(`Erreur syntaxique AST : ${error.message}`, 'error');
+        return;
       }
 
       const res = await workerBridge.executeDryRun(code);
       appState.setDryRunResult(res);
-      appState.setStatus('READY', 'Dry-Run exécuté avec succès');
-      appState.addLog(`Dry-Run réussi : ${res.outputRowCount} lignes produites dans df_out.`, 'success');
+
+      if (res.hasValidDfOut) {
+        appState.setStatus('READY', 'Dry-Run exécuté avec succès (df_out valide)');
+        appState.addLog(`Dry-Run réussi : ${res.outputRowCount} lignes produites dans df_out.`, 'success');
+      } else if (res.error) {
+        appState.setLastError(res.error);
+        appState.setStatus('ERROR', `Échec Dry-Run : ${res.error.message}`);
+        appState.addLog(`Erreur Dry-Run : ${res.error.message}`, 'error');
+      } else {
+        appState.setStatus('READY', 'Code exécuté (aucune variable df_out produite)');
+        appState.addLog("Code exécuté avec succès. Sortie standard / variable capturée (aucun df_out pour l'export).", 'info');
+      }
     } catch (err: any) {
+      const error = err.phase ? err : {
+        phase: 'RUNTIME',
+        message: err.message || String(err),
+        traceback: err.traceback
+      };
+      appState.setLastError(error);
+      appState.setDryRunResult({
+        hasValidDfOut: false,
+        error
+      });
       appState.setStatus('ERROR', `Échec Dry-Run : ${err.message || String(err)}`);
       appState.addLog(`Erreur Dry-Run : ${err.message || String(err)}`, 'error');
     }
@@ -79,6 +121,11 @@ export class CodeEditor {
   private async handleFullRun() {
     const code = this.editorView ? this.editorView.state.doc.toString() : appState.currentCode;
     if (!code.trim()) return;
+
+    if (!appState.dryRunResult?.hasValidDfOut) {
+      alert("L'export CSV nécessite impérativement un DataFrame 'df_out' valide validé par un test Dry-Run.");
+      return;
+    }
 
     appState.setStatus('PROCESSING', 'Exécution complète sur toutes les données...');
     appState.addLog("Lancement du calcul complet sur l'intégralité des données...", 'info');
@@ -108,7 +155,6 @@ export class CodeEditor {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    URL.revokeObjectURL(url);
     appState.addLog(`Fichier CSV '${filename}' téléchargé.`, 'success');
   }
 
@@ -118,7 +164,39 @@ export class CodeEditor {
     appState.addLog("Code Python copié dans le presse-papier.", 'info');
   }
 
+  private attachCodeToPrompt() {
+    const code = this.editorView ? this.editorView.state.doc.toString() : appState.currentCode;
+    if (!code.trim()) {
+      alert("Aucun code à joindre pour le moment.");
+      return;
+    }
+    const lines = code.trim().split('\n').length;
+    appState.addPromptAttachment({
+      id: 'code_current',
+      type: 'code',
+      title: `Code Python éditeur (${lines} lignes)`,
+      content: code,
+      metadata: { lineCount: lines }
+    });
+    appState.addLog("Code Python courant attaché au contexte de la consigne.", 'success');
+  }
+
+  private attachErrorToPrompt() {
+    const err = appState.lastError;
+    if (!err) return;
+    appState.addPromptAttachment({
+      id: `err_${Date.now()}`,
+      type: 'error',
+      title: `Erreur ${err.phase || 'RUNTIME'}`,
+      content: `Message : ${err.message}\n` + (err.traceback ? `Traceback :\n${err.traceback}` : ''),
+      metadata: { errorPhase: err.phase }
+    });
+    appState.addLog("Erreur d'exécution attachée au contexte de la consigne.", 'success');
+  }
+
   public render() {
+    const canExport = !!appState.dryRunResult?.hasValidDfOut;
+
     this.container.innerHTML = `
       <div class="code-editor-panel">
         <div class="editor-toolbar">
@@ -127,9 +205,10 @@ export class CodeEditor {
             <h3>Script Python (Polars vectorisé)</h3>
           </div>
           <div class="toolbar-actions">
+            <button class="btn btn-secondary btn-sm" id="btn-attach-code" title="Joindre ce code comme contexte au prompt">📎 Joindre au prompt</button>
             <button class="btn btn-secondary btn-sm" id="btn-copy-code" title="Copier le code">📋 Copier</button>
             <button class="btn btn-secondary btn-sm" id="btn-dry-run" title="Tester sur échantillon">▶️ Re-tester (Dry-Run)</button>
-            <button class="btn btn-success btn-sm" id="btn-full-run" title="Exécuter et exporter CSV">⚡ Exécuter & Exporter CSV</button>
+            <button class="btn btn-success btn-sm ${canExport ? '' : 'btn-disabled'}" id="btn-full-run" title="${canExport ? 'Exécuter et exporter CSV' : 'Nécessite un DataFrame df_out valide issu d\'un test Dry-Run'}" ${canExport ? '' : 'disabled'}>⚡ Exécuter & Exporter CSV</button>
           </div>
         </div>
 
@@ -163,49 +242,95 @@ export class CodeEditor {
       return;
     }
 
-    const previewRows = res.headPreview || [];
-    const cols: { name: string; dtype?: string }[] = res.outputColumns && res.outputColumns.length > 0
-      ? res.outputColumns
-      : (previewRows.length > 0 ? Object.keys(previewRows[0]).map(k => ({ name: k })) : []);
-
-    previewContainer.innerHTML = `
-      <div class="preview-box">
-        <div class="preview-header">
-          <div class="preview-stats">
-            <strong>Résultat df_out :</strong>
-            <span>${res.outputRowCount.toLocaleString()} lignes</span>
-            <span>•</span>
-            <span>${res.outputColCount} colonnes</span>
+    // Cas 1 : Erreur rencontrée (AST ou Runtime)
+    if (res.error) {
+      previewContainer.innerHTML = `
+        <div class="preview-box preview-error-box">
+          <div class="preview-header error-header">
+            <div class="preview-stats">
+              <span class="status-error-pill">❌ Erreur ${res.error.phase || 'RUNTIME'}</span>
+              <span class="error-summary-msg">${res.error.message}</span>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="btn-attach-preview-error" title="Joindre cette erreur à la consigne pour correction">
+              ➕ Joindre cette erreur au prompt
+            </button>
+          </div>
+          <div class="console-output-box error-traceback-content">
+            <pre>${res.error.traceback || res.error.message}</pre>
           </div>
         </div>
+      `;
 
-        <div class="table-scroll-container mini-preview">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th class="row-num-col">#</th>
-                ${cols.map(c => `
-                  <th>
-                    <div style="display: flex; flex-direction: column; gap: 2px;">
-                      <span style="color: var(--text-main); font-weight: 600;">${c.name}</span>
-                      ${c.dtype ? `<span style="font-size: 10px; font-weight: normal; color: var(--accent-blue); font-family: var(--font-mono);">${c.dtype}</span>` : ''}
-                    </div>
-                  </th>
-                `).join('')}
-              </tr>
-            </thead>
-            <tbody>
-              ${previewRows.map((r, i) => `
+      previewContainer.querySelector('#btn-attach-preview-error')?.addEventListener('click', () => {
+        this.attachErrorToPrompt();
+      });
+      return;
+    }
+
+    // Cas 2 : DataFrame df_out valide
+    if (res.hasValidDfOut && res.headPreview) {
+      const previewRows = res.headPreview;
+      const cols: { name: string; dtype?: string }[] = res.outputColumns && res.outputColumns.length > 0
+        ? res.outputColumns
+        : (previewRows.length > 0 ? Object.keys(previewRows[0]).map(k => ({ name: k })) : []);
+
+      previewContainer.innerHTML = `
+        <div class="preview-box">
+          <div class="preview-header">
+            <div class="preview-stats">
+              <strong>Résultat df_out :</strong>
+              <span>${(res.outputRowCount ?? previewRows.length).toLocaleString()} lignes</span>
+              <span>•</span>
+              <span>${res.outputColCount ?? cols.length} colonnes</span>
+              <span class="badge-success-pill">✓ Prêt pour export CSV</span>
+            </div>
+          </div>
+
+          <div class="table-scroll-container mini-preview">
+            <table class="data-table">
+              <thead>
                 <tr>
-                  <td class="row-num-col">${i + 1}</td>
-                  ${cols.map(c => {
-                    const val = r[c.name];
-                    return `<td>${val === null ? '<span class="null-tag">null</span>' : String(val)}</td>`;
-                  }).join('')}
+                  <th class="row-num-col">#</th>
+                  ${cols.map(c => `
+                    <th>
+                      <div style="display: flex; flex-direction: column; gap: 2px;">
+                        <span style="color: var(--text-main); font-weight: 600;">${c.name}</span>
+                        ${c.dtype ? `<span style="font-size: 10px; font-weight: normal; color: var(--accent-blue); font-family: var(--font-mono);">${c.dtype}</span>` : ''}
+                      </div>
+                    </th>
+                  `).join('')}
                 </tr>
-              `).join('')}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                ${previewRows.map((r, i) => `
+                  <tr>
+                    <td class="row-num-col">${i + 1}</td>
+                    ${cols.map(c => {
+                      const val = r[c.name];
+                      return `<td>${val === null ? '<span class="null-tag">null</span>' : String(val)}</td>`;
+                    }).join('')}
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
+    // Cas 3 : Succès sans df_out (stdout / print() / variables retournées)
+    const stdoutContent = (res.stdout && res.stdout.trim()) || (res.rawOutput && res.rawOutput.trim()) || 'Code exécuté avec succès (aucun print ni variable df_out définie).';
+    previewContainer.innerHTML = `
+      <div class="preview-box preview-stdout-box">
+        <div class="preview-header stdout-header">
+          <div class="preview-stats">
+            <span class="status-info-pill">🖥️ Sortie standard (stdout / variables)</span>
+            <span class="badge-warning-pill">⚠️ Aucun DataFrame 'df_out' produit • Export CSV inactif</span>
+          </div>
+        </div>
+        <div class="console-output-box">
+          <pre>${stdoutContent}</pre>
         </div>
       </div>
     `;
@@ -215,6 +340,7 @@ export class CodeEditor {
     this.container.querySelector('#btn-dry-run')?.addEventListener('click', () => this.handleDryRun());
     this.container.querySelector('#btn-full-run')?.addEventListener('click', () => this.handleFullRun());
     this.container.querySelector('#btn-copy-code')?.addEventListener('click', () => this.copyCode());
+    this.container.querySelector('#btn-attach-code')?.addEventListener('click', () => this.attachCodeToPrompt());
   }
 
   private bindGlobalEvents() {

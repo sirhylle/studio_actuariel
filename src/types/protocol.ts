@@ -26,11 +26,28 @@ export interface TableProfile {
 }
 
 export interface ExecutionResult {
-  outputRowCount: number;
-  outputColCount: number;
+  hasValidDfOut: boolean;
+  outputRowCount?: number;
+  outputColCount?: number;
   outputColumns?: { name: string; dtype: string }[];
-  headPreview: Record<string, any>[];
+  headPreview?: Record<string, any>[];
   outputCsvBuffer?: Uint8Array;
+  stdout?: string;
+  rawOutput?: string;
+  error?: WorkerError;
+}
+
+export interface PromptAttachment {
+  id: string;
+  type: 'code' | 'error' | 'file';
+  title: string;
+  content: string;
+  metadata?: {
+    filename?: string;
+    sizeBytes?: number;
+    lineCount?: number;
+    errorPhase?: string;
+  };
 }
 
 export interface WorkerError {

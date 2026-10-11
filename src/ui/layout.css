@@ -1278,3 +1278,344 @@ body {
   color: #fca5a5;
 }
 
+/* ==========================================================================
+   Prompt Attachments System
+   ========================================================================== */
+
+.prompt-attachments-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.prompt-attachments-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px dashed var(--border-card);
+  border-radius: 6px;
+}
+
+.attachments-chips-list {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: var(--font-sans);
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  color: var(--text-main);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.attachment-chip.code {
+  border-color: rgba(56, 189, 248, 0.4);
+  background: rgba(56, 189, 248, 0.08);
+  color: #7dd3fc;
+}
+
+.attachment-chip.error {
+  border-color: rgba(248, 113, 113, 0.4);
+  background: rgba(248, 113, 113, 0.1);
+  color: #fca5a5;
+}
+
+.attachment-chip.file {
+  border-color: rgba(52, 211, 153, 0.4);
+  background: rgba(52, 211, 153, 0.08);
+  color: #6ee7b7;
+}
+
+.chip-icon {
+  font-size: 12px;
+}
+
+.chip-title {
+  font-weight: 500;
+  max-width: 150px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chip-lines {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+}
+
+.btn-chip-action {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 11px;
+  opacity: 0.7;
+  color: inherit;
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.btn-chip-action:hover {
+  opacity: 1;
+  transform: scale(1.15);
+}
+
+.btn-chip-remove:hover {
+  color: var(--accent-red);
+}
+
+/* Prompt Drag & Drop Area */
+.prompt-input-wrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.prompt-input-wrapper .drop-overlay {
+  display: none;
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.92);
+  border: 2px dashed var(--accent-blue);
+  border-radius: 6px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--accent-blue);
+  font-weight: 600;
+  font-size: 13px;
+  z-index: 10;
+  pointer-events: none;
+  backdrop-filter: blur(2px);
+}
+
+.prompt-input-wrapper.dragover .drop-overlay {
+  display: flex;
+}
+
+.attachments-empty-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.attachments-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.prompt-attachment-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.btn-attach-shortcut {
+  background: #192231;
+  border: 1px solid var(--border-card);
+  color: var(--text-muted);
+  padding: 4px 9px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s;
+}
+
+.btn-attach-shortcut:hover {
+  background: var(--bg-card);
+  border-color: var(--accent-blue);
+  color: var(--text-main);
+}
+
+.btn-attach-shortcut.error-trigger {
+  border-color: rgba(248, 113, 113, 0.4);
+  color: #fca5a5;
+  background: rgba(248, 113, 113, 0.08);
+}
+
+.btn-attach-shortcut.error-trigger:hover {
+  background: rgba(248, 113, 113, 0.2);
+  border-color: var(--accent-red);
+}
+
+/* Attachment Preview Modal */
+.attachment-preview-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.attachment-preview-modal .modal-card {
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border-card);
+  border-radius: 10px;
+  width: 100%;
+  max-width: 720px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.attachment-meta-info {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  background: rgba(0, 0, 0, 0.2);
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle);
+}
+
+.attachment-content-pre-box {
+  background: #0b1120;
+  border: 1px solid var(--border-card);
+  border-radius: 6px;
+  padding: 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-main);
+  max-height: 50vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ==========================================================================
+   Code Editor Output Preview (Stdout & Error)
+   ========================================================================== */
+
+/* Stdout preview box */
+.preview-stdout-box {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: #0b1120;
+}
+
+.stdout-header {
+  padding: 6px 14px;
+  background: #141b27;
+  border-bottom: 1px solid var(--border-card);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.stdout-header strong {
+  color: var(--accent-blue);
+}
+
+.stdout-notice {
+  font-size: 11px;
+  color: var(--accent-amber);
+  background: rgba(251, 191, 36, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(251, 191, 36, 0.2);
+}
+
+.console-output-box {
+  flex: 1;
+  padding: 10px 14px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: #e2e8f0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #070a13;
+}
+
+/* Error preview box in lower panel */
+.preview-error-box {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: rgba(248, 113, 113, 0.04);
+}
+
+.error-header {
+  padding: 6px 14px;
+  background: rgba(248, 113, 113, 0.15);
+  border-bottom: 1px solid rgba(248, 113, 113, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #fca5a5;
+}
+
+.btn-attach-error {
+  background: rgba(248, 113, 113, 0.2);
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  color: #ffffff;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-attach-error:hover {
+  background: rgba(248, 113, 113, 0.35);
+  border-color: var(--accent-red);
+}
+
+.preview-error-box .error-content {
+  flex: 1;
+  padding: 10px 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: #fca5a5;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(15, 23, 42, 0.6);
+}
+
+/* Button disabled state styling */
+.btn:disabled,
+.btn.btn-disabled {
+  opacity: 0.45;
+  cursor: not-allowed !important;
+  pointer-events: none;
+  filter: grayscale(60%);
+}
+

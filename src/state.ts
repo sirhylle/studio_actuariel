@@ -1,4 +1,4 @@
-import { TableProfile, ExecutionResult } from './types/protocol';
+import { TableProfile, ExecutionResult, PromptAttachment, WorkerError } from './types/protocol';
 import { LlmConfig } from './types/llm';
 
 export type AppStatus = 'UNINITIALIZED' | 'LOADING' | 'READY' | 'PROCESSING' | 'ERROR';
@@ -30,6 +30,8 @@ class AppState {
   
   public currentCode: string = '';
   public promptInstruction: string = '';
+  public promptAttachments: PromptAttachment[] = [];
+  public lastError: WorkerError | null = null;
   
   public dryRunResult: ExecutionResult | null = null;
   public extractionResult: Record<string, any> | null = null;
@@ -142,8 +144,15 @@ class AppState {
     }
   }
 
-  public setCode(code: string) {
+  public setCode(code: string, isFromUserEdit = false) {
+    const codeChanged = this.currentCode !== code;
     this.currentCode = code;
+
+    // Si l'utilisateur modifie manuellement le code, invalider le dernier résultat de dry-run
+    if (isFromUserEdit && codeChanged && this.dryRunResult) {
+      this.dryRunResult = { ...this.dryRunResult, hasValidDfOut: false };
+    }
+
     this.notify();
   }
 
@@ -152,8 +161,38 @@ class AppState {
     this.notify();
   }
 
+  public addPromptAttachment(attachment: PromptAttachment) {
+    // Si c'est du code ou une erreur, remplacer un éventuel badge préexistant du même type
+    if (attachment.type === 'code' || attachment.type === 'error') {
+      this.promptAttachments = this.promptAttachments.filter(a => a.type !== attachment.type);
+    } else {
+      // Pour les fichiers, éviter les doublons par nom
+      this.promptAttachments = this.promptAttachments.filter(a => a.id !== attachment.id);
+    }
+    this.promptAttachments.push(attachment);
+    this.notify();
+  }
+
+  public removePromptAttachment(id: string) {
+    this.promptAttachments = this.promptAttachments.filter(a => a.id !== id);
+    this.notify();
+  }
+
+  public clearPromptAttachments() {
+    this.promptAttachments = [];
+    this.notify();
+  }
+
+  public setLastError(err: WorkerError | null) {
+    this.lastError = err;
+    this.notify();
+  }
+
   public setDryRunResult(result: ExecutionResult | null) {
     this.dryRunResult = result;
+    if (result?.error) {
+      this.lastError = result.error;
+    }
     this.notify();
   }
 

@@ -127,11 +127,14 @@ def run_extraction(extraction_code):
     return json.dumps(data, default=str)
 `,
 
-  // Wrapper d'exécution (Dry-Run sur dfs_sample ou Full sur dfs_full)
+  // Wrapper d'exécution (Dry-Run sur dfs_sample ou Full sur dfs_full) avec capture stdout et sorties polyvalentes
   RUNNER_WRAPPER: `
 import polars as pl
 import json
 import math
+import sys
+import io
+import traceback
 
 def run_pipeline(user_code, is_dry_run=True, output_sep=";"):
     if is_dry_run:
@@ -144,31 +147,83 @@ def run_pipeline(user_code, is_dry_run=True, output_sep=";"):
         "dfs": env_dfs
     }
     
-    # Exécution du code utilisateur
-    exec(user_code, exec_globals)
+    # Capture de sys.stdout pour intercepter les print()
+    old_stdout = sys.stdout
+    captured_io = io.StringIO()
+    sys.stdout = captured_io
 
-    if "df_out" not in exec_globals or not isinstance(exec_globals["df_out"], pl.DataFrame):
-        raise ValueError("Le code exécuté doit impérativement définir un DataFrame nommé 'df_out'.")
+    exec_error = None
+    try:
+        exec(user_code, exec_globals)
+    except Exception as e:
+        exec_error = {
+            "phase": "RUNTIME",
+            "message": str(e),
+            "traceback": traceback.format_exc()
+        }
+    finally:
+        sys.stdout = old_stdout
 
-    df_res = exec_globals["df_out"]
+    stdout_str = captured_io.getvalue().strip()
 
-    preview_rows = df_res.head(10).to_dicts()
-    # Nettoyage strict pour éviter NaN/Infinity qui cassent JSON.parse en JavaScript
-    for row in preview_rows:
-        for k, v in row.items():
-            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
-                row[k] = None
+    if exec_error is not None:
+        if not is_dry_run:
+            raise RuntimeError(exec_error["message"])
+        return json.dumps({
+            "hasValidDfOut": False,
+            "stdout": stdout_str,
+            "error": exec_error
+        }, default=str)
 
-    output_meta = {
-        "outputRowCount": df_res.height,
-        "outputColCount": df_res.width,
-        "outputColumns": [{"name": c, "dtype": str(df_res[c].dtype)} for c in df_res.columns],
-        "headPreview": preview_rows
-    }
+    # Vérification de df_out
+    df_candidate = exec_globals.get("df_out")
 
+    # Tolérance : conversion automatique d'une Series en DataFrame mono-colonne
+    if isinstance(df_candidate, pl.Series):
+        df_candidate = df_candidate.to_frame()
+        exec_globals["df_out"] = df_candidate
+
+    if isinstance(df_candidate, pl.DataFrame):
+        preview_rows = df_candidate.head(10).to_dicts()
+        # Nettoyage des NaN / Infinity
+        for row in preview_rows:
+            for k, v in row.items():
+                if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                    row[k] = None
+
+        output_meta = {
+            "hasValidDfOut": True,
+            "stdout": stdout_str,
+            "outputRowCount": df_candidate.height,
+            "outputColCount": df_candidate.width,
+            "outputColumns": [{"name": c, "dtype": str(df_candidate[c].dtype)} for c in df_candidate.columns],
+            "headPreview": preview_rows
+        }
+
+        if not is_dry_run:
+            df_candidate.write_csv("/data/output.csv", separator=output_sep)
+
+        return json.dumps(output_meta, default=str)
+
+    # Cas où df_out n'est PAS un DataFrame
     if not is_dry_run:
-        df_res.write_csv("/data/output.csv", separator=output_sep)
+        raise ValueError("L'exécution complète et l'export CSV nécessitent impérativement un DataFrame nommé 'df_out'.")
 
-    return json.dumps(output_meta, default=str)
+    # Recherche d'un retour alternatif (ex: variable res, output, df)
+    alt_var_name = None
+    alt_val_str = None
+    for k in ["res", "output", "result", "df"]:
+        if k in exec_globals and k != "dfs" and k != "pl":
+            alt_var_name = k
+            alt_val = exec_globals[k]
+            alt_val_str = str(alt_val)
+            break
+
+    return json.dumps({
+        "hasValidDfOut": False,
+        "stdout": stdout_str,
+        "rawOutput": alt_val_str,
+        "altVarName": alt_var_name
+    }, default=str)
 `
 };

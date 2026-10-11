@@ -19,6 +19,23 @@ export class Orchestrator {
 
     const config = appState.llmConfig;
 
+    // Intégration transparente des pièces jointes contextuelles (code, erreurs, scripts SAS)
+    let enrichedInstruction = userInstruction;
+    const attachments = appState.promptAttachments;
+    if (attachments.length > 0) {
+      enrichedInstruction += "\n\n### PIÈCES JOINTES & CONTEXTE ADDITIONNEL FOURNI PAR L'UTILISATEUR :\n";
+      for (const att of attachments) {
+        if (att.type === 'code') {
+          enrichedInstruction += `\n#### 🐍 CODE SOURCE PYTHON ATTACHÉ (${att.title}) :\n\`\`\`python\n${att.content}\n\`\`\`\n`;
+        } else if (att.type === 'error') {
+          enrichedInstruction += `\n#### ⚠️ CONTEXTE D'ERREUR DU RUN PRÉCÉDENT (${att.title}) :\n\`\`\`text\n${att.content}\n\`\`\`\n`;
+        } else {
+          const ext = att.metadata?.filename?.split('.').pop()?.toLowerCase() || 'text';
+          enrichedInstruction += `\n#### 📎 FICHIER JOINT (${att.title}) :\n\`\`\`${ext}\n${att.content}\n\`\`\`\n`;
+        }
+      }
+    }
+
     try {
       // -------------------------------------------------------------
       // Étape 1 : Décision de la stratégie d'échantillonnage par le LLM
@@ -27,7 +44,7 @@ export class Orchestrator {
       appState.addLog("Interrogation du LLM pour décider de la stratégie d'échantillonnage...", 'info');
 
       const strategyRes = await llmService.requestSamplingStrategy(
-        userInstruction,
+        enrichedInstruction,
         tables,
         config.maxSampleRows || 50,
         config
@@ -53,7 +70,7 @@ export class Orchestrator {
       appState.addLog("Génération du code vectorisé par le LLM...", 'info');
 
       const codeRes = await llmService.generateActuarialCode(
-        userInstruction,
+        enrichedInstruction,
         tables,
         extractedSample,
         config
@@ -66,7 +83,7 @@ export class Orchestrator {
       // -------------------------------------------------------------
       // Étape 4 : Validation locale AST, Dry-Run et boucle d'auto-guérison
       // -------------------------------------------------------------
-      await this.runSelfHealingValidation(currentCode, userInstruction, extractedSample, 0);
+      await this.runSelfHealingValidation(currentCode, enrichedInstruction, extractedSample, 0);
 
     } catch (err: any) {
       appState.setStatus('ERROR', `Erreur d'orchestration : ${err.message || String(err)}`);
