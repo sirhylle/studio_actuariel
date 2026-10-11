@@ -157,9 +157,20 @@ RÈGLES IMPÉRATIVES :
    - "transformationsApplied" : array de string listant les typages et opérations clés.
    - "warnings" : array de string signalant d'éventuelles anomalies repérées dans l'échantillon.`;
 
-    let userPrompt = `### ÉCHANTILLONS RÉELS EXTRAITS POUR CETTE TÂCHE :\n\`\`\`json\n`;
-    userPrompt += JSON.stringify(extractedSamples, null, 2);
-    userPrompt += `\n\`\`\`\n\n`;
+    let userPrompt = '';
+    if (Object.keys(extractedSamples).length > 0) {
+      userPrompt += `### ÉCHANTILLONS RÉELS EXTRAITS POUR CETTE TÂCHE :\n\`\`\`json\n`;
+      userPrompt += JSON.stringify(extractedSamples, null, 2);
+      userPrompt += `\n\`\`\`\n\n`;
+    } else if (tables.length > 0) {
+      userPrompt += `### SCHÉMAS DES TABLES DISPONIBLES :\n`;
+      for (const t of tables) {
+        userPrompt += `- Table dfs['${t.alias}'] : colonnes [${t.columns.map(c => c.name).join(', ')}]\n`;
+      }
+      userPrompt += `\n`;
+    } else {
+      userPrompt += `(Information : Aucune table de données n'est pré-chargée dans 'dfs'. Génère le code autonome ou traite les pièces jointes/instructions fournies ci-dessous en définissant 'df_out' ou le résultat adéquat).\n\n`;
+    }
 
     userPrompt += `### INSTRUCTION MÉTIER OU CODE SAS À TRAITER :\n${instruction}\n`;
 
@@ -364,6 +375,23 @@ sample_out = {
   }
 
   private mockActuarialCode(_instruction: string, tables: TableProfile[]): ActuarialCodeResponse {
+    if (tables.length === 0) {
+      return {
+        pythonCode: `import polars as pl
+
+# Exemple de DataFrame généré pour test (mode simulation sans table source)
+df_out = pl.DataFrame({
+    "id_police": ["POL_001", "POL_002", "POL_003", "POL_004", "POL_005"],
+    "prime_annuelle": [450.0, 720.5, 310.0, 1150.0, 580.0],
+    "sinistre_survenu": [False, True, False, True, False],
+    "charge_sinistre": [0.0, 1250.0, 0.0, 480.0, 0.0]
+})
+`,
+        transformationsApplied: ["Création d'un jeu de données synthétique pl.DataFrame"],
+        warnings: ["Mode simulation : configurez votre clé API LLM pour une génération personnalisée."]
+      };
+    }
+
     const hasContrats = tables.some(t => t.alias === 'contrats');
     const hasSinistres = tables.some(t => t.alias === 'sinistres');
 

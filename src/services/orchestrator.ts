@@ -11,12 +11,6 @@ export class Orchestrator {
     this.isRunning = true;
 
     const tables = appState.getLoadedTableProfiles();
-    if (tables.length === 0) {
-      appState.addLog("Veuillez d'abord charger au moins une table de données.", 'warn');
-      this.isRunning = false;
-      return;
-    }
-
     const config = appState.llmConfig;
 
     // Intégration transparente des pièces jointes contextuelles (code, erreurs, scripts SAS)
@@ -37,36 +31,42 @@ export class Orchestrator {
     }
 
     try {
-      // -------------------------------------------------------------
-      // Étape 1 : Décision de la stratégie d'échantillonnage par le LLM
-      // -------------------------------------------------------------
-      appState.setStatus('PROCESSING', "Étape 1/4 : Décision de la stratégie d'échantillonnage par l'IA...");
-      appState.addLog("Interrogation du LLM pour décider de la stratégie d'échantillonnage...", 'info');
+      let extractedSample: Record<string, any> = {};
 
-      const strategyRes = await llmService.requestSamplingStrategy(
-        enrichedInstruction,
-        tables,
-        config.maxSampleRows || 50,
-        config
-      );
+      if (tables.length > 0) {
+        // -------------------------------------------------------------
+        // Étape 1 : Décision de la stratégie d'échantillonnage par le LLM
+        // -------------------------------------------------------------
+        appState.setStatus('PROCESSING', "Étape 1/4 : Décision de la stratégie d'échantillonnage par l'IA...");
+        appState.addLog("Interrogation du LLM pour décider de la stratégie d'échantillonnage...", 'info');
 
-      appState.setExtractionData(strategyRes.strategyExplanation, null);
-      appState.addLog(`Stratégie décidée : ${strategyRes.strategyExplanation}`, 'info');
+        const strategyRes = await llmService.requestSamplingStrategy(
+          enrichedInstruction,
+          tables,
+          config.maxSampleRows || 50,
+          config
+        );
+
+        appState.setExtractionData(strategyRes.strategyExplanation, null);
+        appState.addLog(`Stratégie décidée : ${strategyRes.strategyExplanation}`, 'info');
+
+        // -------------------------------------------------------------
+        // Étape 2 : Exécution locale du code d'extraction dans le Worker
+        // -------------------------------------------------------------
+        appState.setStatus('PROCESSING', "Étape 2/4 : Extraction locale de l'échantillon ciblé en Wasm...");
+        appState.addLog("Exécution locale de la requête d'extraction en mémoire...", 'info');
+
+        extractedSample = await workerBridge.executeExtraction(strategyRes.extractionPythonCode);
+        appState.setExtractionData(strategyRes.strategyExplanation, extractedSample);
+        appState.addLog("Échantillon ciblé extrait avec succès et prêt pour l'ancrage.", 'success');
+      } else {
+        appState.addLog("Génération sans table source préalable : traitement autonome de la consigne et des pièces jointes.", 'info');
+      }
 
       // -------------------------------------------------------------
-      // Étape 2 : Exécution locale du code d'extraction dans le Worker
+      // Étape 3 : Génération du code Polars
       // -------------------------------------------------------------
-      appState.setStatus('PROCESSING', "Étape 2/4 : Extraction locale de l'échantillon ciblé en Wasm...");
-      appState.addLog("Exécution locale de la requête d'extraction en mémoire...", 'info');
-
-      const extractedSample = await workerBridge.executeExtraction(strategyRes.extractionPythonCode);
-      appState.setExtractionData(strategyRes.strategyExplanation, extractedSample);
-      appState.addLog("Échantillon ciblé extrait avec succès et prêt pour l'ancrage.", 'success');
-
-      // -------------------------------------------------------------
-      // Étape 3 : Génération du code Polars avec Grounding sur-mesure
-      // -------------------------------------------------------------
-      appState.setStatus('PROCESSING', "Étape 3/4 : Génération du code Polars vectorisé avec vos données réelles...");
+      appState.setStatus('PROCESSING', tables.length > 0 ? "Étape 3/4 : Génération du code Polars vectorisé..." : "Génération du code Polars par l'IA...");
       appState.addLog("Génération du code vectorisé par le LLM...", 'info');
 
       const codeRes = await llmService.generateActuarialCode(
@@ -86,7 +86,7 @@ export class Orchestrator {
       await this.runSelfHealingValidation(currentCode, enrichedInstruction, extractedSample, 0);
 
     } catch (err: any) {
-      appState.setStatus('ERROR', `Erreur d'orchestration : ${err.message || String(err)}`);
+      appState.setStatus('READY', 'Pyodide & Polars Prêts');
       appState.addLog(`Échec : ${err.message || String(err)}`, 'error');
     } finally {
       this.isRunning = false;

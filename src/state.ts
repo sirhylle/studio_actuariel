@@ -46,7 +46,8 @@ class AppState {
     token: '',
     model: 'gpt-4o',
     maxSampleRows: 50,
-    maxSelfHealingRetries: 2
+    maxSelfHealingRetries: 2,
+    useMock: false
   };
 
   constructor() {
@@ -59,6 +60,10 @@ class AppState {
       if (stored) {
         const parsed = JSON.parse(stored);
         this.llmConfig = { ...this.llmConfig, ...parsed };
+        // Si un token est présent, désactiver useMock par défaut sauf si explicitement conservé
+        if (this.llmConfig.token && parsed.useMock === undefined) {
+          this.llmConfig.useMock = false;
+        }
       }
     } catch (e) {
       console.warn('[AppState] Impossible de charger la configuration depuis localStorage:', e);

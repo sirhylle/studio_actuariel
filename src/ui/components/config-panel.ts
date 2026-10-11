@@ -35,7 +35,7 @@ export class ConfigPanel {
       model: modelInput ? modelInput.value.trim() : (appState.llmConfig.model || 'gpt-6-luna'),
       maxSampleRows: maxSampleInput ? parseInt(maxSampleInput.value || '50', 10) : (appState.llmConfig.maxSampleRows || 50),
       maxSelfHealingRetries: maxRetriesInput ? parseInt(maxRetriesInput.value || '2', 10) : (appState.llmConfig.maxSelfHealingRetries ?? 2),
-      useMock: mockInput ? mockInput.checked : appState.llmConfig.useMock,
+      useMock: mockInput ? mockInput.checked : Boolean(appState.llmConfig.useMock),
       apiType: apiTypeSelect ? (apiTypeSelect.value as any) : (appState.llmConfig.apiType || 'chat_completions'),
       reasoningEffort: reasoningSelect ? (reasoningSelect.value as any) : (appState.llmConfig.reasoningEffort || 'low')
     };
