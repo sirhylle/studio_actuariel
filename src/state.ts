@@ -1,0 +1,206 @@
+import { TableProfile, ExecutionResult } from './types/protocol';
+import { LlmConfig } from './types/llm';
+
+export type AppStatus = 'UNINITIALIZED' | 'LOADING' | 'READY' | 'PROCESSING' | 'ERROR';
+
+export interface LoadedTable {
+  alias: string;
+  fileName: string;
+  buffer: ArrayBuffer;
+  separator: string;
+  sampleSize: number;
+  profile?: TableProfile;
+}
+
+export interface LogEntry {
+  timestamp: string;
+  level: 'info' | 'success' | 'warn' | 'error';
+  message: string;
+  details?: any;
+}
+
+class AppState {
+  private listeners: Set<() => void> = new Set();
+
+  public status: AppStatus = 'UNINITIALIZED';
+  public statusMessage: string = 'Initialisation...';
+  
+  public tables: Map<string, LoadedTable> = new Map();
+  public activeTableAlias: string | null = null;
+  
+  public currentCode: string = '';
+  public promptInstruction: string = '';
+  
+  public dryRunResult: ExecutionResult | null = null;
+  public extractionResult: Record<string, any> | null = null;
+  public extractionStrategy: string | null = null;
+  public transformationsApplied: string[] = [];
+  public warnings: string[] = [];
+  
+  public logs: LogEntry[] = [];
+
+  public llmConfig: LlmConfig = {
+    endpoint: 'https://api.openai.com/v1/chat/completions',
+    token: '',
+    model: 'gpt-4o',
+    maxSampleRows: 50,
+    maxSelfHealingRetries: 2
+  };
+
+  constructor() {
+    this.loadConfigFromStorage();
+  }
+
+  private loadConfigFromStorage() {
+    try {
+      const stored = localStorage.getItem('studio_actuariel_llm_config');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        this.llmConfig = { ...this.llmConfig, ...parsed };
+      }
+    } catch (e) {
+      console.warn('[AppState] Impossible de charger la configuration depuis localStorage:', e);
+    }
+  }
+
+  public saveConfig(config: Partial<LlmConfig>) {
+    this.llmConfig = { ...this.llmConfig, ...config };
+    try {
+      localStorage.setItem('studio_actuariel_llm_config', JSON.stringify(this.llmConfig));
+    } catch (e) {
+      console.warn('[AppState] Erreur de sauvegarde dans localStorage:', e);
+    }
+    this.notify();
+  }
+
+  public clearConfig() {
+    this.llmConfig = {
+      endpoint: '',
+      token: '',
+      model: 'gpt-4o',
+      maxSampleRows: 50,
+      maxSelfHealingRetries: 2
+    };
+    try {
+      localStorage.removeItem('studio_actuariel_llm_config');
+    } catch (e) {}
+    this.notify();
+  }
+
+  public setStatus(status: AppStatus, message?: string) {
+    this.status = status;
+    if (message !== undefined) this.statusMessage = message;
+    this.notify();
+  }
+
+  public addTable(table: LoadedTable) {
+    this.tables.set(table.alias, table);
+    if (!this.activeTableAlias) {
+      this.activeTableAlias = table.alias;
+    }
+    this.notify();
+  }
+
+  public updateTable(alias: string, updates: Partial<LoadedTable>) {
+    const existing = this.tables.get(alias);
+    if (existing) {
+      this.tables.set(alias, { ...existing, ...updates });
+      this.notify();
+    }
+  }
+
+  public removeTable(alias: string) {
+    this.tables.delete(alias);
+    if (this.activeTableAlias === alias) {
+      const remaining = Array.from(this.tables.keys());
+      this.activeTableAlias = remaining.length > 0 ? remaining[0] : null;
+    }
+    this.notify();
+  }
+
+  public renameTableAlias(oldAlias: string, newAlias: string): boolean {
+    if (!newAlias || this.tables.has(newAlias)) return false;
+    const existing = this.tables.get(oldAlias);
+    if (!existing) return false;
+    this.tables.delete(oldAlias);
+    existing.alias = newAlias;
+    if (existing.profile) {
+      existing.profile.alias = newAlias;
+    }
+    this.tables.set(newAlias, existing);
+    if (this.activeTableAlias === oldAlias) {
+      this.activeTableAlias = newAlias;
+    }
+    this.notify();
+    return true;
+  }
+
+  public setActiveTable(alias: string) {
+    if (this.tables.has(alias)) {
+      this.activeTableAlias = alias;
+      this.notify();
+    }
+  }
+
+  public setCode(code: string) {
+    this.currentCode = code;
+    this.notify();
+  }
+
+  public setPromptInstruction(instruction: string) {
+    this.promptInstruction = instruction;
+    this.notify();
+  }
+
+  public setDryRunResult(result: ExecutionResult | null) {
+    this.dryRunResult = result;
+    this.notify();
+  }
+
+  public setExtractionData(strategy: string | null, data: Record<string, any> | null) {
+    this.extractionStrategy = strategy;
+    this.extractionResult = data;
+    this.notify();
+  }
+
+  public setTransformations(transformations: string[], warnings: string[] = []) {
+    this.transformationsApplied = transformations;
+    this.warnings = warnings;
+    this.notify();
+  }
+
+  public addLog(message: string, level: LogEntry['level'] = 'info', details?: any) {
+    const entry: LogEntry = {
+      timestamp: new Date().toLocaleTimeString(),
+      level,
+      message,
+      details
+    };
+    this.logs.unshift(entry); // Le plus récent en premier
+    if (this.logs.length > 200) this.logs.pop();
+    this.notify();
+  }
+
+  public getLoadedTableProfiles(): TableProfile[] {
+    return Array.from(this.tables.values())
+      .map(t => t.profile)
+      .filter((p): p is TableProfile => !!p);
+  }
+
+  public subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private notify() {
+    for (const listener of this.listeners) {
+      try {
+        listener();
+      } catch (err) {
+        console.error('[AppState] Erreur dans un listener:', err);
+      }
+    }
+  }
+}
+
+export const appState = new AppState();
