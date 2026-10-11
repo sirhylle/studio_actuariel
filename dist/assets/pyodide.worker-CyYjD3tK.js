@@ -1,25 +1,20 @@
-const _={PROFILE_TABLE:`
+const c={PROFILE_TABLE:`
 import polars as pl
 import json
 import math
 
 def profile_and_sample(alias, file_path, separator, sample_size, file_type="csv", has_header=True):
-    # Lecture initiale selon le format
-    if file_type == "parquet":
-        df_full = pl.read_parquet(file_path)
-        df_sample = df_full.head(sample_size)
-    else:
-        # CSV / TSV avec gestion de has_header
-        df_sample = pl.read_csv(
-            file_path,
-            separator=separator,
-            has_header=has_header,
-            n_rows=sample_size,
-            infer_schema_length=sample_size,
-            null_values=["", "NA", "NULL", ".", "None", "NR"],
-            truncate_ragged_lines=True
-        )
-        df_full = globals().get("dfs_full", {}).get(alias, df_sample)
+    # Lecture d'un bloc initial pour l'échantillon (les fichiers parquet/xlsx ont été convertis en CSV)
+    df_sample = pl.read_csv(
+        file_path,
+        separator=separator,
+        has_header=has_header,
+        n_rows=sample_size,
+        infer_schema_length=sample_size,
+        null_values=["", "NA", "NULL", ".", "None", "NR"],
+        truncate_ragged_lines=True
+    )
+    df_full = globals().get("dfs_full", {}).get(alias, df_sample)
 
     total_row_count = df_full.height
 
@@ -282,15 +277,15 @@ def run_pipeline(user_code, is_dry_run=True, output_sep=";", output_format="csv"
         "rawOutput": alt_val_str,
         "altVarName": alt_var_name
     }, default=str)
-`};let t=null;async function h(o){const p=(await import(`${o}/pyodide/pyodide.mjs`)).loadPyodide;t=await p({indexURL:`${o}/pyodide/`});const s=`${o}/wheels/polars-1.18.0-cp39-abi3-pyodide_2024_0_wasm32.whl`;await t.loadPackage(s);try{t.FS.mkdirTree("/data")}catch{}t.runPython(_.PROFILE_TABLE),t.runPython(_.LINT_AST),t.runPython(_.RUN_EXTRACTION),t.runPython(_.RUNNER_WRAPPER),t.runPython("dfs_full = {}; dfs_sample = {}")}self.onmessage=async o=>{const{id:n,action:p,payload:s}=o.data;try{switch(p){case"INIT":{const e=s?.vendorBase||`${self.location.origin}/vendor`;await h(e),self.postMessage({id:n,success:!0});break}case"LOAD_TABLE":{const{alias:e,fileName:a,buffer:l,separator:r,sampleSize:i,fileType:m,hasHeader:f}=s,d=m||(a.endsWith(".parquet")||a.endsWith(".pq")?"parquet":"csv"),c=`/data/${e}.${d==="parquet"?"parquet":"csv"}`;if(t.FS.writeFile(c,new Uint8Array(l)),d==="parquet")t.runPython(`dfs_full['${e}'] = pl.read_parquet('${c}')`);else{const g=r.replace(/'/g,"\\'"),x=f!==!1?"True":"False";t.runPython(`
+`};let t=null;async function v(o){const u=(await import(`${o}/pyodide/pyodide.mjs`)).loadPyodide;t=await u({indexURL:`${o}/pyodide/`});const s=`${o}/wheels/polars-1.18.0-cp39-abi3-pyodide_2024_0_wasm32.whl`;await t.loadPackage(s);try{t.FS.mkdirTree("/data")}catch{}t.runPython(c.PROFILE_TABLE),t.runPython(c.LINT_AST),t.runPython(c.RUN_EXTRACTION),t.runPython(c.RUNNER_WRAPPER),t.runPython("dfs_full = {}; dfs_sample = {}")}self.onmessage=async o=>{const{id:n,action:u,payload:s}=o.data;try{switch(u){case"INIT":{const e=s?.vendorBase||`${self.location.origin}/vendor`;await v(e),self.postMessage({id:n,success:!0});break}case"LOAD_TABLE":{const{alias:e,fileName:a,buffer:l,separator:r,sampleSize:i,fileType:m,hasHeader:_}=s,f=m||(a.endsWith(".parquet")||a.endsWith(".pq")?"parquet":"csv"),p=`/data/${e}.csv`;t.FS.writeFile(p,new Uint8Array(l));const y=r.replace(/'/g,"\\'"),g=_!==!1?"True":"False";t.runPython(`
 dfs_full['${e}'] = pl.read_csv(
-    '${c}',
-    separator='${g}',
-    has_header=${x},
+    '${p}',
+    separator='${y}',
+    has_header=${g},
     null_values=["", "NA", "NULL", ".", "None", "NR"],
     truncate_ragged_lines=True
 )
-`)}const y=t.globals.get("profile_and_sample")(e,c,r,i,d,f!==!1),u=JSON.parse(y);u.fileName=a,u.fileType=d,u.hasHeader=f!==!1,self.postMessage({id:n,success:!0,data:u});break}case"UNLOAD_TABLE":{const{alias:e}=s;t.runPython(`
+`);const x=t.globals.get("profile_and_sample")(e,p,r,i,f,_!==!1),d=JSON.parse(x);d.fileName=a,d.fileType=f,d.hasHeader=_!==!1,self.postMessage({id:n,success:!0,data:d});break}case"UNLOAD_TABLE":{const{alias:e}=s;t.runPython(`
 dfs_full.pop('${e}', None)
 dfs_sample.pop('${e}', None)
 `);try{t.FS.unlink(`/data/${e}.csv`)}catch{}try{t.FS.unlink(`/data/${e}.parquet`)}catch{}self.postMessage({id:n,success:!0});break}case"EXECUTE_EXTRACTION":{const a=t.globals.get("run_extraction")(s.extractionCode),l=JSON.parse(a);self.postMessage({id:n,success:!0,data:l});break}case"CHECK_SYNTAX":{const e=t.globals.get("check_syntax"),a=JSON.parse(e(s.code));a.valid?self.postMessage({id:n,success:!0,data:{valid:!0}}):self.postMessage({id:n,success:!0,data:{valid:!1,error:{phase:"AST",message:a.message,line:a.line}}});break}case"EXECUTE_DRY_RUN":{const a=t.globals.get("run_pipeline")(s.code,!0);self.postMessage({id:n,success:!0,data:JSON.parse(a)});break}case"EXECUTE_FULL":{const e=t.globals.get("run_pipeline"),a=s.outputFormat||"csv",l=e(s.code,!1,s.outputSeparator||";",a),r=JSON.parse(l);if(a==="parquet"){const i=t.FS.readFile("/data/output.parquet");r.outputParquetBuffer=i}else{const i=t.FS.readFile("/data/output.csv");r.outputCsvBuffer=i}self.postMessage({id:n,success:!0,data:r});break}}}catch(e){const a=e.message||String(e);self.postMessage({id:n,success:!1,error:{phase:"RUNTIME",message:a,traceback:e.stack||a}})}};

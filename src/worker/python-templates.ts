@@ -6,22 +6,17 @@ import json
 import math
 
 def profile_and_sample(alias, file_path, separator, sample_size, file_type="csv", has_header=True):
-    # Lecture initiale selon le format
-    if file_type == "parquet":
-        df_full = pl.read_parquet(file_path)
-        df_sample = df_full.head(sample_size)
-    else:
-        # CSV / TSV avec gestion de has_header
-        df_sample = pl.read_csv(
-            file_path,
-            separator=separator,
-            has_header=has_header,
-            n_rows=sample_size,
-            infer_schema_length=sample_size,
-            null_values=["", "NA", "NULL", ".", "None", "NR"],
-            truncate_ragged_lines=True
-        )
-        df_full = globals().get("dfs_full", {}).get(alias, df_sample)
+    # Lecture d'un bloc initial pour l'échantillon (les fichiers parquet/xlsx ont été convertis en CSV)
+    df_sample = pl.read_csv(
+        file_path,
+        separator=separator,
+        has_header=has_header,
+        n_rows=sample_size,
+        infer_schema_length=sample_size,
+        null_values=["", "NA", "NULL", ".", "None", "NR"],
+        truncate_ragged_lines=True
+    )
+    df_full = globals().get("dfs_full", {}).get(alias, df_sample)
 
     total_row_count = df_full.height
 

@@ -43,18 +43,14 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       case 'LOAD_TABLE': {
         const { alias, fileName, buffer, separator, sampleSize, fileType, hasHeader } = payload;
         const actualFileType = fileType || (fileName.endsWith('.parquet') || fileName.endsWith('.pq') ? 'parquet' : 'csv');
-        const ext = actualFileType === 'parquet' ? 'parquet' : 'csv';
-        const filePath = `/data/${alias}.${ext}`;
+        const filePath = `/data/${alias}.csv`;
 
-        // Écriture du fichier brut dans le MEMFS de Pyodide
+        // Écriture du fichier brut (ou converti en CSV par hyparquet) dans le MEMFS de Pyodide
         pyodideInstance.FS.writeFile(filePath, new Uint8Array(buffer));
 
-        if (actualFileType === 'parquet') {
-          pyodideInstance.runPython(`dfs_full['${alias}'] = pl.read_parquet('${filePath}')`);
-        } else {
-          const safeSep = separator.replace(/'/g, "\\'");
-          const hasHeaderPy = hasHeader !== false ? 'True' : 'False';
-          pyodideInstance.runPython(`
+        const safeSep = separator.replace(/'/g, "\\'");
+        const hasHeaderPy = hasHeader !== false ? 'True' : 'False';
+        pyodideInstance.runPython(`
 dfs_full['${alias}'] = pl.read_csv(
     '${filePath}',
     separator='${safeSep}',
@@ -63,7 +59,6 @@ dfs_full['${alias}'] = pl.read_csv(
     truncate_ragged_lines=True
 )
 `);
-        }
 
         // Profiling et échantillon initial
         const profileFn = pyodideInstance.globals.get('profile_and_sample');

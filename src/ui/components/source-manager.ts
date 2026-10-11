@@ -1,6 +1,8 @@
 import { appState, LoadedTable } from '../../state';
 import { workerBridge } from '../../services/worker-client';
 import * as XLSX from 'xlsx';
+import { parquetRead } from 'hyparquet';
+import { compressors } from 'hyparquet-compressors';
 
 export class SourceManager {
   private container: HTMLElement;
@@ -44,6 +46,34 @@ export class SourceManager {
 
         if (ext === 'parquet' || ext === 'pq') {
           detectedType = 'parquet';
+          appState.addLog(`Décompression et conversion Apache Parquet de '${file.name}' via hyparquet...`, 'info');
+          const rows: any[] = [];
+          await new Promise<void>((resolve, reject) => {
+            parquetRead({
+              file: buffer,
+              compressors,
+              rowFormat: 'object',
+              onComplete: (data: any[]) => {
+                rows.push(...data);
+                resolve();
+              }
+            }).catch(reject);
+          });
+
+          if (rows.length > 0) {
+            const cols = Object.keys(rows[0]);
+            const headerLine = cols.join(';');
+            const dataLines = rows.map(r => cols.map(c => {
+              const val = r[c];
+              if (val === null || val === undefined) return '';
+              const strVal = String(val);
+              return strVal.includes(';') || strVal.includes('\n') ? `"${strVal.replace(/"/g, '""')}"` : strVal;
+            }).join(';'));
+            const csvText = [headerLine, ...dataLines].join('\n');
+            buffer = new TextEncoder().encode(csvText).buffer;
+            detectedSep = ';';
+            appState.addLog(`Table Parquet convertie avec succès (${rows.length} lignes, ${cols.length} colonnes).`, 'info');
+          }
         } else if (ext === 'xlsx' || ext === 'xls') {
           detectedType = 'xlsx';
           appState.addLog(`Analyse du classeur Excel '${file.name}' via SheetJS...`, 'info');
