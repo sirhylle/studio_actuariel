@@ -113,7 +113,7 @@ export class PromptBox {
                   🐍 Joindre code éditeur
                 </button>
               ` : ''}
-              ${appState.lastError ? `
+              ${(appState.lastError && appState.currentCode.trim()) ? `
                 <button type="button" class="btn-attach-shortcut error-trigger" id="btn-quick-error" title="Joindre le contexte d'erreur actuel">
                   ⚠️ Joindre l'erreur
                 </button>

@@ -148,8 +148,12 @@ class AppState {
     const codeChanged = this.currentCode !== code;
     this.currentCode = code;
 
-    // Si l'utilisateur modifie manuellement le code, invalider le dernier résultat de dry-run
-    if (isFromUserEdit && codeChanged && this.dryRunResult) {
+    // Si le code est complètement vidé par l'utilisateur
+    if (!code.trim()) {
+      this.lastError = null;
+      this.dryRunResult = null;
+    } else if (isFromUserEdit && codeChanged && this.dryRunResult) {
+      // Si l'utilisateur modifie manuellement le code, invalider le dernier résultat de dry-run
       this.dryRunResult = { ...this.dryRunResult, hasValidDfOut: false };
     }
 
@@ -162,12 +166,12 @@ class AppState {
   }
 
   public addPromptAttachment(attachment: PromptAttachment) {
-    // Si c'est du code ou une erreur, remplacer un éventuel badge préexistant du même type
+    // Si c'est du code ou une erreur, remplacer un éventuel badge préexistant du même type (mise à jour du snapshot)
     if (attachment.type === 'code' || attachment.type === 'error') {
       this.promptAttachments = this.promptAttachments.filter(a => a.type !== attachment.type);
     } else {
-      // Pour les fichiers, éviter les doublons par nom
-      this.promptAttachments = this.promptAttachments.filter(a => a.id !== attachment.id);
+      // Pour les fichiers, éviter les doublons par identifiant ou nom identique
+      this.promptAttachments = this.promptAttachments.filter(a => a.id !== attachment.id && a.title !== attachment.title);
     }
     this.promptAttachments.push(attachment);
     this.notify();
@@ -192,6 +196,9 @@ class AppState {
     this.dryRunResult = result;
     if (result?.error) {
       this.lastError = result.error;
+    } else {
+      // Si l'exécution ne sort plus en erreur, effacer l'erreur
+      this.lastError = null;
     }
     this.notify();
   }

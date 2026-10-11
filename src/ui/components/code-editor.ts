@@ -50,6 +50,20 @@ export class CodeEditor {
       });
     }
 
+    // Contrôle du bouton Joindre au prompt
+    const attachCodeBtn = this.container.querySelector('#btn-attach-code') as HTMLButtonElement;
+    if (attachCodeBtn) {
+      const hasCode = !!appState.currentCode.trim();
+      attachCodeBtn.disabled = !hasCode;
+      if (!hasCode) {
+        attachCodeBtn.classList.add('btn-disabled');
+        attachCodeBtn.title = "Aucun code à joindre pour le moment";
+      } else {
+        attachCodeBtn.classList.remove('btn-disabled');
+        attachCodeBtn.title = "Joindre ce code comme contexte au prompt";
+      }
+    }
+
     // Contrôle strict du bouton Exécuter & Exporter CSV
     const fullRunBtn = this.container.querySelector('#btn-full-run') as HTMLButtonElement;
     if (fullRunBtn) {
@@ -83,7 +97,8 @@ export class CodeEditor {
           hasValidDfOut: false,
           error
         });
-        appState.setStatus('ERROR', `Erreur syntaxique AST : ${error.message}`);
+        // Ne pas marquer le moteur Wasm en erreur globale : il reste prêt pour d'autres calculs
+        appState.setStatus('READY', 'Pyodide & Polars Prêts');
         appState.addLog(`Erreur syntaxique AST : ${error.message}`, 'error');
         return;
       }
@@ -91,15 +106,13 @@ export class CodeEditor {
       const res = await workerBridge.executeDryRun(code);
       appState.setDryRunResult(res);
 
+      appState.setStatus('READY', 'Pyodide & Polars Prêts');
       if (res.hasValidDfOut) {
-        appState.setStatus('READY', 'Dry-Run exécuté avec succès (df_out valide)');
         appState.addLog(`Dry-Run réussi : ${res.outputRowCount} lignes produites dans df_out.`, 'success');
       } else if (res.error) {
         appState.setLastError(res.error);
-        appState.setStatus('ERROR', `Échec Dry-Run : ${res.error.message}`);
         appState.addLog(`Erreur Dry-Run : ${res.error.message}`, 'error');
       } else {
-        appState.setStatus('READY', 'Code exécuté (aucune variable df_out produite)');
         appState.addLog("Code exécuté avec succès. Sortie standard / variable capturée (aucun df_out pour l'export).", 'info');
       }
     } catch (err: any) {
@@ -113,7 +126,8 @@ export class CodeEditor {
         hasValidDfOut: false,
         error
       });
-      appState.setStatus('ERROR', `Échec Dry-Run : ${err.message || String(err)}`);
+      // Le moteur Wasm reste opérationnel
+      appState.setStatus('READY', 'Pyodide & Polars Prêts');
       appState.addLog(`Erreur Dry-Run : ${err.message || String(err)}`, 'error');
     }
   }
@@ -205,9 +219,9 @@ export class CodeEditor {
             <h3>Script Python (Polars vectorisé)</h3>
           </div>
           <div class="toolbar-actions">
-            <button class="btn btn-secondary btn-sm" id="btn-attach-code" title="Joindre ce code comme contexte au prompt">📎 Joindre au prompt</button>
+            <button class="btn btn-secondary btn-sm ${appState.currentCode.trim() ? '' : 'btn-disabled'}" id="btn-attach-code" title="${appState.currentCode.trim() ? 'Joindre ce code comme contexte au prompt' : 'Aucun code à joindre pour le moment'}" ${appState.currentCode.trim() ? '' : 'disabled'}>📎 Joindre au prompt</button>
             <button class="btn btn-secondary btn-sm" id="btn-copy-code" title="Copier le code">📋 Copier</button>
-            <button class="btn btn-secondary btn-sm" id="btn-dry-run" title="Tester sur échantillon">▶️ Re-tester (Dry-Run)</button>
+            <button class="btn btn-secondary btn-sm" id="btn-dry-run" title="Tester sur échantillon">▶️ Tester (Dry-Run)</button>
             <button class="btn btn-success btn-sm ${canExport ? '' : 'btn-disabled'}" id="btn-full-run" title="${canExport ? 'Exécuter et exporter CSV' : 'Nécessite un DataFrame df_out valide issu d\'un test Dry-Run'}" ${canExport ? '' : 'disabled'}>⚡ Exécuter & Exporter CSV</button>
           </div>
         </div>
@@ -231,8 +245,9 @@ export class CodeEditor {
     const previewContainer = this.container.querySelector('#editor-preview-container');
     if (!previewContainer) return;
 
+    const code = this.editorView ? this.editorView.state.doc.toString() : appState.currentCode;
     const res = appState.dryRunResult;
-    if (!res) {
+    if (!code.trim() || !res) {
       previewContainer.innerHTML = `
         <div class="preview-empty">
           <span>ℹ️</span>
